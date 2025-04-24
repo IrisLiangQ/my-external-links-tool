@@ -1,7 +1,9 @@
+// pages/index.js – improved Step‑3 result cards & clean Markdown preview (2025‑04‑24)
 import { useState, useMemo } from 'react';
 import axios from 'axios';
 
 export default function Tool() {
+  /* ---------- state ---------- */
   const [text, setText] = useState('');
   const [keywords, setKeywords] = useState([]);
   const [selected, setSelected] = useState(new Set());
@@ -11,16 +13,17 @@ export default function Tool() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
 
+  /* ---------- helpers ---------- */
   const previewHTML = useMemo(() => {
     if (!keywords.length) return text.replace(/\n/g, '<br/>');
     let html = text;
     keywords.forEach(({ keyword }) => {
       const reg = new RegExp(keyword, 'gi');
-      html = html.replace(reg, match => {
+      html = html.replace(reg, m => {
         const picked = selected.has(keyword);
         const bg = picked ? '#fb923c' : '#fde047';
-        const fg = picked ? '#ffffff' : '#000000';
-        return `<mark data-kw="${keyword}" style="background:${bg};color:${fg};cursor:pointer;">${match}</mark>`;
+        const fg = picked ? '#fff' : '#000';
+        return `<mark data-kw="${keyword}" style="background:${bg};color:${fg};cursor:pointer;">${m}</mark>`;
       });
     });
     return html.replace(/\n/g, '<br/>');
@@ -35,6 +38,7 @@ export default function Tool() {
     return md;
   }, [step, text, chosen]);
 
+  /* ---------- API ---------- */
   async function analyze() {
     if (!text.trim()) return;
     setLoading(true); setMsg('');
@@ -49,7 +53,7 @@ export default function Tool() {
   }
 
   async function confirmKW() {
-    if (!selected.size) { setMsg('请至少点击一个关键词'); return; }
+    if (!selected.size) { setMsg('请先点击关键词'); return; }
     setLoading(true); setMsg('');
     try {
       const tasks = Array.from(selected).map(async kw => {
@@ -59,14 +63,15 @@ export default function Tool() {
       });
       const obj = Object.fromEntries(await Promise.all(tasks));
       setLinks(obj);
-      setChosen(Object.fromEntries(Object.entries(obj).map(([k,a])=>[k, a[0]?.link || ''])));
+      setChosen(Object.fromEntries(Object.entries(obj).map(([k,a]) => [k, a[0]?.link || ''])));
       setStep(3);
     } catch (e) {
       setMsg(e.response?.data?.error || e.message);
     } finally { setLoading(false); }
   }
 
-  function handleClick(e) {
+  /* ---------- click highlight ---------- */
+  function handleHighlight(e) {
     let el = e.target;
     if (el.nodeType !== 1) el = el.parentElement;
     const mark = el && el.closest('mark[data-kw]');
@@ -79,52 +84,55 @@ export default function Tool() {
     });
   }
 
+  /* ---------- UI ---------- */
   return (
-    <main className="max-w-6xl mx-auto p-6 space-y-5" onClick={step===2?handleClick:undefined}>
-      <h1 className="text-2xl font-bold mb-2">AI 外链优化工具</h1>
+    <main className="max-w-4xl mx-auto p-6 space-y-6" onClick={step===2?handleHighlight:undefined}>
+      <h1 className="text-2xl font-bold">AI 外链优化工具</h1>
       {msg && <p className="text-red-600">{msg}</p>}
 
       {step===1 && (
         <>
-          <textarea className="w-full border p-3 h-80" value={text} placeholder="粘贴英文文章" onChange={e=>setText(e.target.value)} />
-          <button className="mt-3 bg-blue-600 text-white px-4 py-2 rounded" onClick={analyze} disabled={loading}>
-            {loading?'分析中…':'分析关键词'}
-          </button>
+          <textarea className="w-full border p-3 h-72" placeholder="粘贴英文文章" value={text} onChange={e=>setText(e.target.value)} />
+          <button className="mt-3 bg-blue-600 text-white px-4 py-2 rounded" disabled={loading} onClick={analyze}>{loading?'分析中…':'分析关键词'}</button>
         </>
       )}
 
       {step===2 && (
         <div className="space-y-4">
           <div className="border p-3 h-72 overflow-auto whitespace-pre-wrap rounded" dangerouslySetInnerHTML={{__html:previewHTML}} />
-          <p className="text-sm text-gray-600">点击黄色关键词选中（变橙色）。</p>
-          <button className="bg-green-600 text-white px-4 py-2 rounded" onClick={confirmKW} disabled={loading}>
-            {loading?'处理中…':'确认选择并生成外链'}
-          </button>
+          <button className="bg-green-600 text-white px-4 py-2 rounded" disabled={loading} onClick={confirmKW}>{loading?'处理中…':'确认选择并生成外链'}</button>
         </div>
       )}
 
       {step===3 && (
-        <div className="space-y-6">
-          {Object.entries(links).map(([kw,list])=>(
-            <div key={kw} className="border rounded p-4 space-y-2">
-              <p className="font-semibold">{kw}</p>
-              {list.length===0? <p className="text-red-600 text-sm">未找到外链</p>:
-                list.map(item=>(
-                  <label key={item.link} className="flex items-start space-x-2">
+        <div className="space-y-8">
+          {Object.entries(links).map(([kw, list]) => (
+            <section key={kw} className="border rounded-lg p-4 space-y-3">
+              <h2 className="font-semibold text-orange-700">{kw}</h2>
+              {list.length === 0 ? (
+                <p className="text-sm text-red-600">(无可用外链)</p>
+              ) : (
+                list.map(item => (
+                  <label key={item.link} className="flex items-start gap-2 p-2 rounded-lg border hover:bg-gray-50 cursor-pointer"
+                         style={{borderColor: chosen[kw]===item.link ? '#fb923c' : 'transparent'}}>  
                     <input type="radio" name={`link-${kw}`} value={item.link} checked={chosen[kw]===item.link} onChange={()=>setChosen({...chosen,[kw]:item.link})} />
-                    <div>
-                      <p className="font-medium text-blue-700 underline truncate max-w-xl" title={item.title}>{item.title}</p>
-                      <p className="text-sm text-gray-600 truncate max-w-xl" title={item.snippet}>{item.snippet}</p>
+                    <div className="space-y-0.5">
+                      <a href={item.link} target="_blank" rel="noreferrer" className="text-blue-700 underline font-medium">{item.title}</a>
+                      <p className="text-xs text-gray-600 max-w-xl truncate" title={item.snippet}>{item.snippet}</p>
                     </div>
                   </label>
                 ))
-              }
-            </div>
+              )}
+            </section>
           ))}
-          <textarea readOnly className="w-full border p-3 h-52" value={markdown} />
-          <button className="bg-purple-600 text-white px-4 py-2 rounded" onClick={()=>{navigator.clipboard.writeText(markdown);alert('已复制 Markdown')}}>
-            复制 Markdown
-          </button>
+
+          <section className="space-y-2">
+            <h2 className="font-semibold">Markdown 预览</h2>
+            <textarea readOnly className="w-full border p-3 h-48" value={markdown} />
+            <button className="bg-purple-600 text-white px-4 py-2 rounded" onClick={()=>{navigator.clipboard.writeText(markdown);alert('已复制 Markdown')}}>
+              复制 Markdown
+            </button>
+          </section>
         </div>
       )}
     </main>
