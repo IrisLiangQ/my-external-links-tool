@@ -1,13 +1,11 @@
 import { Configuration, OpenAIApi } from 'openai';
-
 const openai = new OpenAIApi(
   new Configuration({ apiKey: process.env.OPENAI_API_KEY })
 );
 
-// Remove ```json fences if the model wraps output
-function stripCodeFence(raw) {
-  const fenced = raw.match(/```[a-zA-Z]*\s*([\s\S]*?)```/);
-  return fenced ? fenced[1].trim() : raw.trim();
+function strip(raw) {
+  const m = raw.match(/```[a-zA-Z]*\\s*([\\s\\S]*?)```/);
+  return m ? m[1].trim() : raw.trim();
 }
 
 export default async function handler(req, res) {
@@ -23,15 +21,11 @@ Text:
 `;
 
   try {
-    const resp = await openai.createChatCompletion({
+    const r = await openai.createChatCompletion({
       model: 'gpt-3.5-turbo',
       messages: [{ role: 'user', content: prompt }],
     });
-
-    const raw = resp.data.choices[0].message.content || '';
-    const jsonStr = stripCodeFence(raw);
-    const data = JSON.parse(jsonStr);
-
+    const data = JSON.parse(strip(r.data.choices[0].message.content || '[]'));
     res.status(200).json({ keywords: data });
   } catch (e) {
     res.status(500).json({ error: e.message });
