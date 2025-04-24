@@ -9,14 +9,13 @@ export default async function handler(req, res) {
   if (!apiKey) return res.status(500).json({ error: 'Missing SERPER_API_KEY' });
 
   try {
-    const resp = await axios.post(
+    const r = await axios.post(
       'https://google.serper.dev/search',
       { q: query, gl: 'us', hl: 'en' },
       { headers: { 'X-API-KEY': apiKey } }
     );
-    const top = (resp.data.organic || []).slice(0, 3).map((r) => ({
-      title: r.title,
-      link: r.link,
+    const top = (r.data.organic || []).slice(0, 3).map(o => ({
+      title: o.title, link: o.link, snippet: o.snippet || ''
     }));
     res.status(200).json({ results: top });
   } catch (e) {
