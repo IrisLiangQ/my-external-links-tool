@@ -1,27 +1,35 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import axios from 'axios';
 
 export default function ExternalLinksTool() {
-  /* ---------------------------- state ----------------------------- */
+  /* ------------------------------ state ----------------------------- */
   const [text, setText] = useState('');
-  const [keywords, setKeywords] = useState([]);          // [{ keyword, reason, query }]
-  const [selected, setSelected] = useState(new Set());   // user ticked keywords
-  const [links, setLinks] = useState({});                // { kw: [ {title, link, snippet} ] }
-  const [chosen, setChosen] = useState({});              // { kw: link }
-  const [step, setStep] = useState(1);                   // 1-edit 2-choose kw 3-choose link
+  const [keywords, setKeywords] = useState([]);          // [{keyword,reason,query}]
+  const [selected, setSelected] = useState(new Set());   // Set<string>
+  const [links, setLinks] = useState({});                // {kw:[{title,link,snippet}]}
+  const [chosen, setChosen] = useState({});              // {kw:link}
+  const [step, setStep] = useState(1);                   // 1 edit | 2 choose kw | 3 choose link
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
 
-  /* ------------------------- memo helpers ------------------------- */
+  /* --------------------------- helpers ----------------------------- */
   const previewHTML = useMemo(() => {
     if (keywords.length === 0) return text.replace(/\n/g, '<br/>');
     let html = text;
     keywords.forEach(({ keyword }) => {
       const reg = new RegExp(keyword, 'gi');
-      html = html.replace(reg, `<mark class="bg-yellow-200 rounded">${keyword}</mark>`);
+      html = html.replace(
+        reg,
+        match =>
+          `<mark data-kw="${keyword}" class="cursor-pointer px-1 rounded ${
+            selected.has(keyword)
+              ? 'bg-orange-400 text-white'
+              : 'bg-yellow-200'
+          }">${match}</mark>`
+      );
     });
     return html.replace(/\n/g, '<br/>');
-  }, [text, keywords]);
+  }, [text, keywords, selected]);
 
   const markdown = useMemo(() => {
     if (step !== 3) return '';
@@ -32,10 +40,11 @@ export default function ExternalLinksTool() {
     return md;
   }, [step, text, chosen]);
 
-  /* ----------------------- network functions ---------------------- */
+  /* ------------------------ network functions ---------------------- */
   const analyze = async () => {
     if (!text.trim()) return;
-    setLoading(true); setMsg('');
+    setLoading(true);
+    setMsg('');
     try {
       const { data } = await axios.post('/api/ai', { text });
       setKeywords(data.keywords || []);
@@ -43,79 +52,100 @@ export default function ExternalLinksTool() {
       setStep(2);
     } catch (e) {
       setMsg(e.response?.data?.error || e.message);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const confirmKWs = async () => {
-    if (selected.size === 0) { setMsg('请至少选择一个关键词'); return; }
-    setLoading(true); setMsg('');
+    if (selected.size === 0) {
+      setMsg('请至少选择一个关键词');
+      return;
+    }
+    setLoading(true);
+    setMsg('');
     try {
       const tasks = Array.from(selected).map(async kw => {
-        const { data } = await axios.post('/api/search', {
-          query: keywords.find(k => k.keyword === kw).query,
-        });
+        const query = keywords.find(k => k.keyword === kw).query;
+        const { data } = await axios.post('/api/search', { query });
         return [kw, data.results.slice(0, 3)];
       });
       const resultObj = Object.fromEntries(await Promise.all(tasks));
       setLinks(resultObj);
-      setChosen(Object.fromEntries(Object.entries(resultObj).map(([k, arr]) => [k, arr[0]?.link || ''])));
+      setChosen(
+        Object.fromEntries(
+          Object.entries(resultObj).map(([k, arr]) => [k, arr[0]?.link || ''])
+        )
+      );
       setStep(3);
     } catch (e) {
       setMsg(e.response?.data?.error || e.message);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
-  /* -------------------------- UI helpers -------------------------- */
-  const toggleKW = kw => {
-    const next = new Set(selected);
-    next.has(kw) ? next.delete(kw) : next.add(kw);
-    setSelected(next);
-  };
+  /* ---------------------- click-to-toggle kw ----------------------- */
+  const previewRef = useRef(null);
+  useEffect(() => {
+    if (!previewRef.current) return;
+    const el = previewRef.current;
+    const handler = e => {
+      const mark = e.target.closest('mark[data-kw]');
+      if (!mark) return;
+      const kw = mark.getAttribute('data-kw');
+      const next = new Set(selected);
+      next.has(kw) ? next.delete(kw) : next.add(kw);
+      setSelected(next);
+    };
+    el.addEventListener('click', handler);
+    return () => el.removeEventListener('click', handler);
+  }, [selected]);
 
-  const handleLinkPick = (kw, link) => setChosen({ ...chosen, [kw]: link });
-
-  /* ---------------------------- render ---------------------------- */
+  /* ----------------------------- UI -------------------------------- */
   return (
     <main className="max-w-6xl mx-auto p-6 space-y-4">
       <h1 className="text-2xl font-bold">AI 外链优化工具</h1>
       {msg && <p className="text-red-600">{msg}</p>}
 
+      {/* Step 1: input only */}
       {step === 1 && (
-        <div className="grid md:grid-cols-2 gap-4">
+        <>
           <textarea
             className="w-full border p-3 h-80"
             placeholder="粘贴英文文章"
             value={text}
             onChange={e => setText(e.target.value)}
           />
-          <div className="border p-3 h-80 overflow-auto whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: previewHTML }} />
-        </div>
+          <button
+            className="mt-3 bg-blue-600 text-white px-4 py-2 rounded"
+            disabled={loading}
+            onClick={analyze}
+          >
+            {loading ? '分析中…' : '分析关键词'}
+          </button>
+        </>
       )}
 
-      {step === 1 && (
-        <button className="bg-blue-600 text-white px-4 py-2 rounded" disabled={loading} onClick={analyze}>
-          {loading ? '分析中…' : '分析关键词'}
-        </button>
-      )}
-
+      {/* Step 2: highlight + keyword selection */}
       {step === 2 && (
-        <div>
-          <div className="border p-3 mb-4 h-60 overflow-auto whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: previewHTML }} />
-          <ul className="space-y-2 mb-4">
-            {keywords.map(({ keyword, reason }) => (
-              <li key={keyword} className="flex items-center space-x-2">
-                <input type="checkbox" checked={selected.has(keyword)} onChange={() => toggleKW(keyword)} />
-                <span className="font-semibold" title={reason}>{keyword}</span>
-                <span className="text-gray-500 text-sm truncate" title={reason}>{reason}</span>
-              </li>
-            ))}
-          </ul>
-          <button className="bg-green-600 text-white px-4 py-2 rounded" disabled={loading} onClick={confirmKWs}>
+        <div className="space-y-4">
+          <div
+            ref={previewRef}
+            className="border p-3 h-72 overflow-auto whitespace-pre-wrap"
+            dangerouslySetInnerHTML={{ __html: previewHTML }}
+          />
+          <button
+            className="bg-green-600 text-white px-4 py-2 rounded"
+            disabled={loading}
+            onClick={confirmKWs}
+          >
             {loading ? '处理中…' : '确认选择并生成外链'}
           </button>
         </div>
       )}
 
+      {/* Step 3: link choices + Markdown */}
       {step === 3 && (
         <div className="space-y-6">
           {Object.entries(links).map(([kw, list]) => (
@@ -126,17 +156,30 @@ export default function ExternalLinksTool() {
               ) : (
                 <div className="space-y-2">
                   {list.map(item => (
-                    <label key={item.link} className="flex items-start space-x-2">
+                    <label
+                      key={item.link}
+                      className="flex items-start space-x-2"
+                    >
                       <input
                         type="radio"
                         name={`link-${kw}`}
                         value={item.link}
                         checked={chosen[kw] === item.link}
-                        onChange={() => handleLinkPick(kw, item.link)}
+                        onChange={() => setChosen({ ...chosen, [kw]: item.link })}
                       />
                       <div>
-                        <p className="font-medium text-blue-700 underline truncate max-w-xl" title={item.title}>{item.title}</p>
-                        <p className="text-sm text-gray-600 truncate max-w-xl" title={item.snippet}>{item.snippet}</p>
+                        <p
+                          className="font-medium text-blue-700 underline truncate max-w-xl"
+                          title={item.title}
+                        >
+                          {item.title}
+                        </p>
+                        <p
+                          className="text-sm text-gray-600 truncate max-w-xl"
+                          title={item.snippet}
+                        >
+                          {item.snippet}
+                        </p>
                       </div>
                     </label>
                   ))}
@@ -145,8 +188,18 @@ export default function ExternalLinksTool() {
             </div>
           ))}
 
-          <textarea readOnly className="w-full border p-3 h-52" value={markdown} />
-          <button className="bg-purple-600 text-white px-4 py-2 rounded" onClick={() => { navigator.clipboard.writeText(markdown); alert('已复制 Markdown'); }}>
+          <textarea
+            readOnly
+            className="w-full border p-3 h-52"
+            value={markdown}
+          />
+          <button
+            className="bg-purple-600 text-white px-4 py-2 rounded"
+            onClick={() => {
+              navigator.clipboard.writeText(markdown);
+              alert('已复制 Markdown');
+            }}
+          >
             复制 Markdown
           </button>
         </div>
