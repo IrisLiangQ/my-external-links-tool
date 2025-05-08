@@ -1,3 +1,6 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* 简单全局样式，可按需调整 */
+body { @apply bg-gray-50 text-gray-900 antialiased; }
