@@ -3,15 +3,12 @@ import axios from "axios";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-/* ---------- 更鲁棒的解析：锁定最外层 [ ... ] ---------- */
-function parseJsonArray(str, fallback = []) {
+function parseJson(str, fallback = []) {
   try {
-    const start = str.indexOf("[");
-    const end   = str.lastIndexOf("]");
-    if (start === -1 || end === -1) throw new Error("no brackets");
-    const slice = str.slice(start, end + 1);
-    return JSON.parse(slice);
-  } catch (_) {
+    const s = str.indexOf("[");
+    const e = str.lastIndexOf("]");
+    return JSON.parse(str.slice(s, e + 1));
+  } catch {
     return fallback;
   }
 }
@@ -21,44 +18,51 @@ export default async function handler(req, res) {
   const { text } = req.body;
 
   try {
-    /* 1. 要关键词 */
-    const kwResp = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+    /* GPT 3.5 免费模型抽重点短语 + 评分 */
+    const gpt = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",            // ← 改这里，免费
       messages: [
-        { role: "system", content: "You are an SEO assistant." },
+        { role: "system", content: "You are an expert SEO assistant." },
         {
           role: "user",
           content:
-            `Extract the 10 most important English keywords from the following article. ` +
-            `Reply ONLY with a JSON array (no markdown, no extra text).\n\n${text}`,
+            `For the following paragraph, list up to 10 KEY PHRASES (2-5 English words) ` +
+            `that are most important to the author's main idea. ` +
+            `Return a pure JSON array where each item is {"phrase":"...", "score":1-5}. ` +
+            `Score 5 = absolutely central; 1 = barely relevant.\n\n${text}`,
         },
       ],
     });
 
-    const raw   = kwResp.choices[0].message.content;
-    const keywords = parseJsonArray(raw);
+    const pick = parseJson(gpt.choices[0].message.content);
 
-    if (!keywords.length) {
-      console.error("API ERROR: keyword array empty, raw =>", raw);
-      return res.status(500).json({ error: "Keyword parse failed" });
+    const phrases = pick
+      .filter(p => p.score >= 3)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+
+    if (!phrases.length) {
+      return res.status(500).json({ error: "No key phrases" });
     }
 
-    /* 2. 查 3 条链接 */
-    const payload = [];
-    for (const kw of keywords) {
+    /* Serper 查链接 */
+    const result = [];
+    for (const { phrase } of phrases) {
       const { data } = await axios.post(
         "https://google.serper.dev/search",
-        { q: kw, num: 3 },
+        { q: phrase, num: 3 },
         { headers: { "X-API-KEY": process.env.SERPER_API_KEY } }
       );
-
-      payload.push({
-        keyword: kw,
-        options: data.organic.slice(0, 3).map(i => ({ url: i.link }))
+      result.push({
+        keyword: phrase,
+        options: data.organic.slice(0, 3).map(i => ({
+          url: i.link,
+          title: i.title || i.link,
+        })),
       });
     }
 
-    return res.status(200).json({ keywords: payload, original: text });
+    return res.status(200).json({ keywords: result, original: text });
   } catch (e) {
     console.error("API ERROR:", e);
     return res.status(500).json({ error: "Internal error" });
