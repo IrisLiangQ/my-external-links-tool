@@ -2,7 +2,16 @@ import OpenAI from "openai";
 import axios from "axios";
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-/* ---------- 工具函数 ---------- */
+/* ---------- 通用解析工具 ---------- */
+function safeObjectParse(str, fallback = {}) {
+  try {
+    const s = str.indexOf("{");
+    const e = str.lastIndexOf("}");
+    return JSON.parse(str.slice(s, e + 1));
+  } catch {
+    return fallback;
+  }
+}
 async function embed(text) {
   const { data } = await openai.embeddings.create({
     model: "text-embedding-3-small",
@@ -19,6 +28,8 @@ function cosine(a, b) {
   }
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
+
+/* ---------- 停用词 ---------- */
 const STOP = ["time","people","things","important","great","good","bad","nice","big","small","many"];
 
 export default async function handler(req, res) {
@@ -26,8 +37,8 @@ export default async function handler(req, res) {
   const { text } = req.body;
 
   try {
-    /* 1️⃣ GPT：topic + 短语打分 */
-    const g = await openai.chat.completions.create({
+    /* ① GPT 返回主题+短语 */
+    const gpt = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
         { role: "system", content: "You are an SEO assistant." },
@@ -36,8 +47,7 @@ export default async function handler(req, res) {
           content:
 `Step1 ► List 2‒3 keyword TAGS describing the paragraph topic.
 Step2 ► Extract up to 15 KEY PHRASES (2-4 English words) strongly related to that topic.
-Return ONLY JSON:
-
+Return ONLY valid JSON like:
 {
  "topics":["tag1","tag2"],
  "phrases":[ {"text":"…","score":1-5}, … ]
@@ -48,9 +58,12 @@ Paragraph:
         },
       ],
     });
-    const { topics, phrases } = JSON.parse(g.choices[0].message.content);
 
-    /* 2️⃣ 语义过滤：score≥3 + 非停用词 + 相似度>0.2 */
+    const { topics = [], phrases = [] } = safeObjectParse(
+      gpt.choices[0].message.content
+    );
+
+    /* ② 语义过滤 */
     const paraVec = await embed(text);
     const filtered = [];
     for (const p of phrases) {
@@ -60,9 +73,10 @@ Paragraph:
       if (sim > 0.2) filtered.push(p.text);
       if (filtered.length === 10) break;
     }
-    if (!filtered.length) return res.status(500).json({ error: "No key phrases" });
+    if (!filtered.length)
+      return res.status(500).json({ error: "No key phrases" });
 
-    /* 3️⃣ 查外链 */
+    /* ③ 外链查询 */
     const result = [];
     for (const kw of filtered) {
       const { data } = await axios.post(
@@ -72,9 +86,13 @@ Paragraph:
       );
       result.push({
         keyword: kw,
-        options: data.organic.slice(0, 3).map(o => ({ url: o.link, title: o.title })),
+        options: data.organic.slice(0, 3).map(o => ({
+          url: o.link,
+          title: o.title || o.link,
+        })),
       });
     }
+
     return res.status(200).json({ topics, keywords: result, original: text });
   } catch (e) {
     console.error("ai.js error", e);
