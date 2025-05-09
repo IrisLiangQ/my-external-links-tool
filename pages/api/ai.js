@@ -2,43 +2,45 @@ import OpenAI from "openai";
 import axios from "axios";
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-function safeJson(str, fallback) {
-  try {
-    const s = str.indexOf("[");
-    const e = str.lastIndexOf("]");
-    return JSON.parse(str.slice(s, e + 1));
-  } catch { return fallback; }
+/* ---------- 工具函数 ---------- */
+async function embed(text) {
+  const { data } = await openai.embeddings.create({
+    model: "text-embedding-3-small",
+    input: text,
+  });
+  return data[0].embedding;
 }
+function cosine(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na  += a[i] * a[i];
+    nb  += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+const STOP = ["time","people","things","important","great","good","bad","nice","big","small","many"];
 
-/* ❶ 极简停用词表，可再扩充 */
-const COMMON = ["time","years","people","things","way","problem","important",
-                "big","small","good","bad","nice","great","new","old","many",
-                "very","some","any","thing","issue","example","solution","type"];
-
-/* API Route */
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
   const { text } = req.body;
 
   try {
-    /* ① GPT：主题 + 关键词 + 评分 */
-    const gpt = await openai.chat.completions.create({
+    /* 1️⃣ GPT：topic + 短语打分 */
+    const g = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
         { role: "system", content: "You are an SEO assistant." },
         {
           role: "user",
           content:
-`Step1: Summarize the MAIN TOPIC of the following paragraph in one short phrase.
-Step2: Extract up to 12 KEY PHRASES (2-4 English words) that are highly relevant to that topic. 
-Return ONLY valid JSON:
+`Step1 ► List 2‒3 keyword TAGS describing the paragraph topic.
+Step2 ► Extract up to 15 KEY PHRASES (2-4 English words) strongly related to that topic.
+Return ONLY JSON:
 
 {
-  "topic": "<the main topic>",
-  "keyPhrases":[
-      {"phrase":"...","score":1-5},
-      ...
-  ]
+ "topics":["tag1","tag2"],
+ "phrases":[ {"text":"…","score":1-5}, … ]
 }
 
 Paragraph:
@@ -46,47 +48,36 @@ Paragraph:
         },
       ],
     });
+    const { topics, phrases } = JSON.parse(g.choices[0].message.content);
 
-    /* ② 解析结果 */
-    const rawObj = JSON.parse(gpt.choices[0].message.content);
-    const topic  = rawObj.topic || "";
-    let phrases  = rawObj.keyPhrases || [];
-
-    /* ③ 本地过滤：score ≥3 且不含通用停用词 */
-    phrases = phrases
-      .filter(p => p.score >= 3)
-      .filter(p => !COMMON.some(w => p.phrase.toLowerCase().split(" ").includes(w)))
-      .slice(0, 10);
-
-    if (!phrases.length) {
-      return res.status(500).json({ error: "No relevant phrases" });
+    /* 2️⃣ 语义过滤：score≥3 + 非停用词 + 相似度>0.2 */
+    const paraVec = await embed(text);
+    const filtered = [];
+    for (const p of phrases) {
+      if (p.score < 3) continue;
+      if (STOP.some(w => p.text.toLowerCase().split(" ").includes(w))) continue;
+      const sim = cosine(await embed(p.text), paraVec);
+      if (sim > 0.2) filtered.push(p.text);
+      if (filtered.length === 10) break;
     }
+    if (!filtered.length) return res.status(500).json({ error: "No key phrases" });
 
-    /* ④ 对每个短语搜外链 */
+    /* 3️⃣ 查外链 */
     const result = [];
-    for (const { phrase } of phrases) {
+    for (const kw of filtered) {
       const { data } = await axios.post(
         "https://google.serper.dev/search",
-        { q: phrase, num: 3 },
+        { q: kw, num: 3 },
         { headers: { "X-API-KEY": process.env.SERPER_API_KEY } }
       );
       result.push({
-        keyword: phrase,
-        options: data.organic.slice(0, 3).map(i => ({
-          url: i.link,
-          title: i.title || i.link,
-        })),
+        keyword: kw,
+        options: data.organic.slice(0, 3).map(o => ({ url: o.link, title: o.title })),
       });
     }
-
-    /* ⑤ 返回给前端 */
-    return res.status(200).json({
-      topic,
-      keywords: result,
-      original: text,
-    });
+    return res.status(200).json({ topics, keywords: result, original: text });
   } catch (e) {
-    console.error("ai.js ERROR:", e);
+    console.error("ai.js error", e);
     return res.status(500).json({ error: e.message });
   }
 }
