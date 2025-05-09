@@ -2,17 +2,18 @@ import { useState, useRef } from "react";
 import { FiCopy } from "react-icons/fi";
 
 export default function Home() {
-  /* ----------------- React 状态 ----------------- */
-  const [raw, setRaw]         = useState("");
-  const [data, setData]       = useState(null);   // {topics, keywords, original}
-  const [html, setHtml]       = useState("");
-  const [active, setActive]   = useState(null);   // 当前弹窗关键词
+  /* ---------- 状态 ---------- */
+  const [raw, setRaw]   = useState("");
+  const [data, setData] = useState(null);           // /api/ai 结果
+  const [html, setHtml] = useState("");
+  const [active, setActive] = useState(null);       // 弹窗关键词
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied]   = useState(false);
+  const [pickedCount, setPickedCount] = useState(0);
+  const [copied, setCopied] = useState(false);
 
   const popRef = useRef(null);
 
-  /* -------- 调 /api/ai 获取关键词 -------- */
+  /* ---------- 调 /api/ai ---------- */
   async function analyze() {
     if (!raw.trim()) return alert("请先粘贴英文段落！");
     setLoading(true);
@@ -23,19 +24,18 @@ export default function Home() {
     });
     if (!r.ok) { alert("服务器分析失败"); setLoading(false); return; }
     const j = await r.json();
-    setData(j);
-    setCopied(false);
+    setData(j); setPickedCount(0); setCopied(false);
 
     let body = j.original;
     j.keywords.forEach(({ keyword }) => {
-      if (body.includes(`data-kw="${keyword}"`)) return;        // 已高亮则跳过
+      if (body.includes(`data-kw="${keyword}"`)) return;
       const reg = new RegExp(`\\b${keyword}\\b`, "i");
       body = body.replace(
         reg,
         `<span data-kw="${keyword}"` +
-        ` class="kw bg-green-100 text-green-900 px-1 rounded border-b border-dashed border-green-700` +
-        ` hover:bg-green-200 cursor-pointer transition">` +
-          `${keyword}<sup class="caret ml-0.5">▾</sup>` +
+        ` class="kw inline-block bg-green-100 text-green-900 px-1 rounded` +
+        ` border border-green-300 hover:bg-green-200 cursor-pointer transition">` +
+          `${keyword}` +
         `</span>`
       );
     });
@@ -43,7 +43,7 @@ export default function Home() {
     setLoading(false);
   }
 
-  /* -------- 点击关键词（未选 / 已选） -------- */
+  /* ---------- 点击关键词 ---------- */
   function onClickEditor(e) {
     const span = e.target.closest("span[data-kw]");
     if (!span) return;
@@ -58,22 +58,26 @@ export default function Home() {
     }
   }
 
-  /* -------- 选 / 重选 / 移除 外链 -------- */
+  /* ---------- 选 / 移除 外链 ---------- */
   async function chooseLink(kw, opt) {
-    /* === 移除外链 === */
+    /* 移除外链  -------------------------------- */
     if (!opt) {
-      const regSel = new RegExp(`<span[^>]*data-kw="${kw}"[^>]*>.*?<\\/span>`, "gi");
-      const highlight =
-        `<span data-kw="${kw}" class="kw bg-green-100 text-green-900 px-1 rounded` +
-        ` border-b border-dashed border-green-700 hover:bg-green-200 cursor-pointer transition">` +
-          `${kw}<sup class="caret ml-0.5">▾</sup>` +
+      const regSel = new RegExp(`<span[^>]*data-kw="${kw}"[^>]*>.*?<\\/span>`,"gi");
+      const green =
+        `<span data-kw="${kw}" class="kw inline-block bg-green-100 text-green-900 px-1 rounded` +
+        ` border border-green-300 hover:bg-green-200 cursor-pointer transition">` +
+          `${kw}` +
         `</span>`;
-      setHtml(prev => prev.replace(regSel, highlight));
+      setHtml(prev => {
+        const after = prev.replace(regSel, green);
+        setPickedCount((cnt)=>cnt-1);
+        return after;
+      });
       setActive(null);
       return;
     }
 
-    /* === 新建 / 替换外链 === */
+    /* 新建 / 替换外链  -------------------------- */
     let reason = "";
     try {
       const r = await fetch("/api/reason", {
@@ -82,50 +86,47 @@ export default function Home() {
         body: JSON.stringify({ url: opt.url, phrase: kw }),
       });
       if (r.ok) reason = (await r.json()).reason;
-    } catch (e) { console.error(e); }
-    if (!reason) reason = "authoritative reference";
+    } catch { /* ignore */ }
+    if (!reason) reason = "authoritative source";
 
-    const selected =
-      `<span data-kw="${kw}" class="picked text-blue-700 hover:bg-blue-50 cursor-pointer">` +
+    const blue =
+      `<span data-kw="${kw}" class="picked inline-block bg-blue-100 text-blue-900 px-1 rounded` +
+        ` border border-blue-300 hover:bg-blue-200 cursor-pointer transition">` +
         `<a href="${opt.url}" target="_blank" rel="noopener" class="underline">${kw}</a>` +
         ` ((${reason}))` +
       `</span>`;
 
-    const reg = new RegExp(`<span[^>]*data-kw="${kw}"[^>]*>.*?<\\/span>`, "gi");
-    setHtml(prev => prev.replace(reg, selected));
+    const reg = new RegExp(`<span[^>]*data-kw="${kw}"[^>]*>.*?<\\/span>`,"gi");
+    setHtml(prev => {
+      const existed = /class="picked"/.test(prev.match(reg)?.[0] || "");
+      if (!existed) setPickedCount(cnt=>cnt+1);
+      return prev.replace(reg, blue);
+    });
     setActive(null);
   }
 
-  /* -------- 复制 HTML（保留 ((reason)) ) -------- */
-  function copyHtml() {
-    if (!/class="picked"/.test(html)) {
-      alert("请先点击关键词并选定外链，再复制 HTML");
-      return;
-    }
-
+  /* ---------- 确认选择 / 复制 HTML ---------- */
+  function confirmAndCopy() {
     let final = html
-      .replace(/<span class="kw"[^>]*>(.*?)<\/span>/g, "$1")     // 去未选高亮
-      .replace(/<span class="picked"[^>]*>(.*?)<\/span>/g, "$1");// 去 wrapper
-
+      .replace(/<span class="kw"[^>]*>(.*?)<\/span>/g, "$1")
+      .replace(/<span class="picked"[^>]*>(.*?)<\/span>/g, "$1");
     navigator.clipboard.writeText(final);
-    setCopied(true); setTimeout(()=>setCopied(false), 2000);
+    setCopied(true); setTimeout(()=>setCopied(false),2000);
   }
 
-  /* ---------------- 渲染 ---------------- */
+  /* ---------- UI ---------- */
   return (
     <div className="min-h-screen flex flex-col items-center py-10 px-4 bg-gray-50">
-      {/* Header */}
       <header className="text-center mb-6">
-        <h1 className="text-3xl font-bold flex items-center justify-center gap-2">
+        <h1 className="text-2xl font-bold flex items-center justify-center gap-2">
           <span className="text-orange-500">⚡</span> 外链优化
         </h1>
         <p className="text-sm text-gray-500">AI驱动的文章外链优化工具</p>
       </header>
 
-      {/* 卡片 */}
       <div className="w-full max-w-5xl bg-white shadow rounded-2xl p-8 space-y-6">
         {!data ? (
-          /* ------- 输入阶段 ------- */
+          /* -------- 输入阶段 -------- */
           <>
             <textarea
               rows={10}
@@ -143,22 +144,31 @@ export default function Home() {
             </button>
           </>
         ) : (
-          /* ------- 编辑阶段 ------- */
+          /* -------- 编辑阶段 -------- */
           <>
             <h2 className="font-semibold text-lg">文本编辑器</h2>
-            <p className="text-xs text-gray-500 mb-2">点击关键词可以预览，复制后直接使用</p>
+            <p className="text-xs text-gray-500 mb-2">
+              绿色块表示可添加外链，点击选择后变蓝。必须至少选择一个才能继续。
+            </p>
             <div
               className="prose max-w-none border rounded-md p-4 md:px-6"
               dangerouslySetInnerHTML={{ __html: html }}
               onClick={onClickEditor}
             />
 
+            {/* 确认按钮 */}
             <div className="text-right mt-6">
               <button
-                onClick={copyHtml}
-                className="inline-flex items-center gap-2 px-6 py-2 bg-black text-white rounded hover:bg-gray-800"
+                onClick={confirmAndCopy}
+                disabled={pickedCount === 0}
+                className={
+                  "inline-flex items-center gap-2 px-6 py-2 rounded " +
+                  (pickedCount === 0
+                    ? "bg-gray-400 text-white cursor-not-allowed"
+                    : "bg-black text-white hover:bg-gray-800")
+                }
               >
-                <FiCopy /> {copied ? "Copied!" : "Copy HTML"}
+                <FiCopy/>{copied ? "Copied!" : "确认选择"}
               </button>
             </div>
           </>
@@ -182,11 +192,9 @@ export default function Home() {
               <p className="text-xs text-gray-600 line-clamp-1">{o.url}</p>
             </button>
           ))}
-          {/* 移除按钮：仅已选时可用 */}
           <button
             onClick={()=>chooseLink(active,null)}
-            className="w-full p-3 text-red-500 text-sm hover:bg-red-50"
-          >
+            className="w-full p-3 text-red-500 text-sm hover:bg-red-50">
             ✕ 移除外链
           </button>
         </div>
