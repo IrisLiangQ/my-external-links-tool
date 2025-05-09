@@ -1,19 +1,18 @@
 import { useState, useRef } from "react";
 import { FiCopy } from "react-icons/fi";
 
-/* ---------------- 主组件 ---------------- */
 export default function Home() {
-  /* 状态 */
-  const [raw, setRaw]       = useState("");
-  const [data, setData]     = useState(null);       // { topics, keywords, original }
-  const [html, setHtml]     = useState("");
-  const [active, setActive] = useState(null);       // 当前弹窗关键词
+  /* ----------------- React 状态 ----------------- */
+  const [raw, setRaw]         = useState("");
+  const [data, setData]       = useState(null);   // {topics, keywords, original}
+  const [html, setHtml]       = useState("");
+  const [active, setActive]   = useState(null);   // 当前弹窗关键词
   const [loading, setLoading] = useState(false);
   const [copied, setCopied]   = useState(false);
 
   const popRef = useRef(null);
 
-  /* ---------- 调 /api/ai ---------- */
+  /* -------- 调 /api/ai 获取关键词 -------- */
   async function analyze() {
     if (!raw.trim()) return alert("请先粘贴英文段落！");
     setLoading(true);
@@ -27,14 +26,15 @@ export default function Home() {
     setData(j);
     setCopied(false);
 
-    /* 高亮：浅绿背景 + 虚线下划线 + caret ▾  */
     let body = j.original;
     j.keywords.forEach(({ keyword }) => {
-      if (body.includes(`data-kw="${keyword}"`)) return;         // 去重
+      if (body.includes(`data-kw="${keyword}"`)) return;        // 已高亮则跳过
       const reg = new RegExp(`\\b${keyword}\\b`, "i");
       body = body.replace(
         reg,
-        `<span data-kw="${keyword}" class="kw bg-green-100 text-green-800 px-1 cursor-pointer">` +
+        `<span data-kw="${keyword}"` +
+        ` class="kw bg-green-100 text-green-900 px-1 rounded border-b border-dashed border-green-700` +
+        ` hover:bg-green-200 cursor-pointer transition">` +
           `${keyword}<sup class="caret ml-0.5">▾</sup>` +
         `</span>`
       );
@@ -43,14 +43,13 @@ export default function Home() {
     setLoading(false);
   }
 
-  /* ---------- 点击关键词（未选 or 已选） ---------- */
+  /* -------- 点击关键词（未选 / 已选） -------- */
   function onClickEditor(e) {
     const span = e.target.closest("span[data-kw]");
     if (!span) return;
     const kw = span.dataset.kw;
-    if (!kw) return;
-
     setActive(active === kw ? null : kw);
+
     if (popRef.current) {
       const rc = span.getBoundingClientRect();
       popRef.current.style.top  = `${rc.bottom + window.scrollY + 6}px`;
@@ -59,8 +58,22 @@ export default function Home() {
     }
   }
 
-  /* ---------- 选链接 / 重选 ---------- */
+  /* -------- 选 / 重选 / 移除 外链 -------- */
   async function chooseLink(kw, opt) {
+    /* === 移除外链 === */
+    if (!opt) {
+      const regSel = new RegExp(`<span[^>]*data-kw="${kw}"[^>]*>.*?<\\/span>`, "gi");
+      const highlight =
+        `<span data-kw="${kw}" class="kw bg-green-100 text-green-900 px-1 rounded` +
+        ` border-b border-dashed border-green-700 hover:bg-green-200 cursor-pointer transition">` +
+          `${kw}<sup class="caret ml-0.5">▾</sup>` +
+        `</span>`;
+      setHtml(prev => prev.replace(regSel, highlight));
+      setActive(null);
+      return;
+    }
+
+    /* === 新建 / 替换外链 === */
     let reason = "";
     try {
       const r = await fetch("/api/reason", {
@@ -72,33 +85,36 @@ export default function Home() {
     } catch (e) { console.error(e); }
     if (!reason) reason = "authoritative reference";
 
-    /* 用 wrapper span 保留 data-kw，方便再次点击修改 */
-    const replacement =
-      `<span data-kw="${kw}" class="picked">` +
-        `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a> ((${reason}))` +
+    const selected =
+      `<span data-kw="${kw}" class="picked text-blue-700 hover:bg-blue-50 cursor-pointer">` +
+        `<a href="${opt.url}" target="_blank" rel="noopener" class="underline">${kw}</a>` +
+        ` ((${reason}))` +
       `</span>`;
 
-    /* 把原 <span data-kw="kw" …>…</span> 全部替换（包括已选旧版本） */
-    const reg = new RegExp(`<span[^>]*data-kw="${kw}"[^>]*>.*?<\\/span>`,"gi");
-    setHtml(prev => prev.replace(reg, replacement));
+    const reg = new RegExp(`<span[^>]*data-kw="${kw}"[^>]*>.*?<\\/span>`, "gi");
+    setHtml(prev => prev.replace(reg, selected));
     setActive(null);
   }
 
-  /* ---------- 复制 HTML ---------- */
+  /* -------- 复制 HTML（保留 ((reason)) ) -------- */
   function copyHtml() {
-    /* 将所有 kw / picked wrapper 移除，只保留内部内容 */
+    if (!/class="picked"/.test(html)) {
+      alert("请先点击关键词并选定外链，再复制 HTML");
+      return;
+    }
+
     let final = html
-      .replace(/<span class="kw"[^>]*>(.*?)<\/span>/g, "$1")       // 未选关键词：保留 caret
-      .replace(/<span class="picked"[^>]*>(.*?)<\/span>/g, "$1");  // 已选：保留 a + ((reason))
+      .replace(/<span class="kw"[^>]*>(.*?)<\/span>/g, "$1")     // 去未选高亮
+      .replace(/<span class="picked"[^>]*>(.*?)<\/span>/g, "$1");// 去 wrapper
 
     navigator.clipboard.writeText(final);
     setCopied(true); setTimeout(()=>setCopied(false), 2000);
   }
 
-  /* -------------------- UI -------------------- */
+  /* ---------------- 渲染 ---------------- */
   return (
     <div className="min-h-screen flex flex-col items-center py-10 px-4 bg-gray-50">
-      {/* 顶部 Logo */}
+      {/* Header */}
       <header className="text-center mb-6">
         <h1 className="text-3xl font-bold flex items-center justify-center gap-2">
           <span className="text-orange-500">⚡</span> 外链优化
@@ -106,18 +122,17 @@ export default function Home() {
         <p className="text-sm text-gray-500">AI驱动的文章外链优化工具</p>
       </header>
 
-      {/* 主卡片 */}
+      {/* 卡片 */}
       <div className="w-full max-w-5xl bg-white shadow rounded-2xl p-8 space-y-6">
-
         {!data ? (
-          /* ---------- 输入阶段 ---------- */
+          /* ------- 输入阶段 ------- */
           <>
             <textarea
               rows={10}
               className="w-full border rounded-md p-4"
               placeholder="Paste English paragraph…"
               value={raw}
-              onChange={e => setRaw(e.target.value)}
+              onChange={e=>setRaw(e.target.value)}
             />
             <button
               onClick={analyze}
@@ -128,12 +143,10 @@ export default function Home() {
             </button>
           </>
         ) : (
-          /* ---------- 编辑阶段 ---------- */
+          /* ------- 编辑阶段 ------- */
           <>
             <h2 className="font-semibold text-lg">文本编辑器</h2>
-            <p className="text-xs text-gray-500 mb-2">
-              点击关键词可预览，复制后可直接使用
-            </p>
+            <p className="text-xs text-gray-500 mb-2">点击关键词可以预览，复制后直接使用</p>
             <div
               className="prose max-w-none border rounded-md p-4 md:px-6"
               dangerouslySetInnerHTML={{ __html: html }}
@@ -158,10 +171,10 @@ export default function Home() {
           ref={popRef}
           className="fixed z-50 w-96 bg-white rounded-xl shadow-lg border overflow-hidden"
         >
-          {data.keywords.find(k => k.keyword === active)?.options.map((o, i) => (
+          {data.keywords.find(k=>k.keyword===active)?.options.map((o,i)=>(
             <button
               key={i}
-              onClick={() => chooseLink(active, o)}
+              onClick={()=>chooseLink(active,o)}
               className="flex flex-col items-start w-full p-4 gap-1
                          hover:bg-gray-50 border-b last:border-0 text-left"
             >
@@ -169,6 +182,13 @@ export default function Home() {
               <p className="text-xs text-gray-600 line-clamp-1">{o.url}</p>
             </button>
           ))}
+          {/* 移除按钮：仅已选时可用 */}
+          <button
+            onClick={()=>chooseLink(active,null)}
+            className="w-full p-3 text-red-500 text-sm hover:bg-red-50"
+          >
+            ✕ 移除外链
+          </button>
         </div>
       )}
     </div>
