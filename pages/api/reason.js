@@ -19,7 +19,7 @@ export default async function handler(req, res) {
         {
           role: "user",
           content:
-`In ≤15 words, explain WHY linking to this source helps establish authority for "${phrase}". Do NOT include the URL.`,
+`Within 15 English words, tell readers how this link helps them understand "${phrase}". Focus on insight or data, not the URL.`,
         },
       ],
     });
