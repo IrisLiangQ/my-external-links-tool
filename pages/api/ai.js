@@ -2,15 +2,16 @@ import OpenAI from "openai";
 import axios from "axios";
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-/* ---------- 通用解析工具 ---------- */
-function safeObjectParse(str, fallback = {}) {
-  try {
-    const s = str.indexOf("{");
-    const e = str.lastIndexOf("}");
-    return JSON.parse(str.slice(s, e + 1));
-  } catch {
-    return fallback;
-  }
+/* ---------- 工具 ---------- */
+function stripWrapper(str) {
+  // 去掉 ```json 块或其他前后杂文，只保留 {...}
+  const s = str.indexOf("{");
+  const e = str.lastIndexOf("}");
+  return str.slice(s, e + 1);
+}
+function safeObj(str) {
+  try { return JSON.parse(stripWrapper(str)); }
+  catch { return { topics: [], phrases: [] }; }
 }
 async function embed(text) {
   const { data } = await openai.embeddings.create({
@@ -20,24 +21,26 @@ async function embed(text) {
   return data[0].embedding;
 }
 function cosine(a, b) {
-  let dot = 0, na = 0, nb = 0;
+  let d = 0, na = 0, nb = 0;
   for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    na  += a[i] * a[i];
-    nb  += b[i] * b[i];
+    d  += a[i] * b[i];
+    na += a[i] ** 2;
+    nb += b[i] ** 2;
   }
-  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+  return d / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-/* ---------- 停用词 ---------- */
-const STOP = ["time","people","things","important","great","good","bad","nice","big","small","many"];
+/* ---------- 停用 & 杂域名 ---------- */
+const STOP = ["time","people","things","important","great","good","bad","nice","big","small","many",
+              "type","average","full","mistake","expecting"];
+const LOW_AUTH = ["reddit.com","medium.com","wikipedia.org","linkedin.com","github.com"];
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
   const { text } = req.body;
 
   try {
-    /* ① GPT 返回主题+短语 */
+    /* 1️⃣ GPT: topic & phrases */
     const gpt = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
@@ -45,9 +48,9 @@ export default async function handler(req, res) {
         {
           role: "user",
           content:
-`Step1 ► List 2‒3 keyword TAGS describing the paragraph topic.
-Step2 ► Extract up to 15 KEY PHRASES (2-4 English words) strongly related to that topic.
-Return ONLY valid JSON like:
+`Step-1 ► Give 2-3 short TAGS for the paragraph topic.
+Step-2 ► Extract ≤15 strongly-related KEY PHRASES (2-4 English words) with a 1-5 relevance score.
+Return ONLY JSON:
 {
  "topics":["tag1","tag2"],
  "phrases":[ {"text":"…","score":1-5}, … ]
@@ -59,43 +62,46 @@ Paragraph:
       ],
     });
 
-    const { topics = [], phrases = [] } = safeObjectParse(
-      gpt.choices[0].message.content
-    );
+    const { topics = [], phrases = [] } = safeObj(gpt.choices[0].message.content);
 
-    /* ② 语义过滤 */
-    const paraVec = await embed(text);
-    const filtered = [];
+    /* 2️⃣ 语义 & 停用过滤 */
+    const baseVec = await embed(text);
+    const wanted = [];
     for (const p of phrases) {
       if (p.score < 3) continue;
       if (STOP.some(w => p.text.toLowerCase().split(" ").includes(w))) continue;
-      const sim = cosine(await embed(p.text), paraVec);
-      if (sim > 0.2) filtered.push(p.text);
-      if (filtered.length === 10) break;
+      const sim = cosine(await embed(p.text), baseVec);
+      if (sim >= 0.25) wanted.push(p.text);
+      if (wanted.length === 10) break;
     }
-    if (!filtered.length)
-      return res.status(500).json({ error: "No key phrases" });
+    if (!wanted.length) return res.status(500).json({ error: "No key phrases" });
 
-    /* ③ 外链查询 */
-    const result = [];
-    for (const kw of filtered) {
+    /* 3️⃣ 外链查询 + 域名优先级 */
+    const rank = url => {
+      const host = new URL(url).hostname.replace("www.","");
+      if (host.endsWith(".gov") || host.endsWith(".edu")) return 0;
+      if (/tesla|chargepoint|nrel|energystar|shell|bp|chargehub/i.test(host)) return 1;
+      if (LOW_AUTH.some(d => host.includes(d))) return 3;
+      return 2;
+    };
+
+    const keywords = [];
+    for (const kw of wanted) {
       const { data } = await axios.post(
         "https://google.serper.dev/search",
-        { q: kw, num: 3 },
+        { q: kw, num: 8 },
         { headers: { "X-API-KEY": process.env.SERPER_API_KEY } }
       );
-      result.push({
-        keyword: kw,
-        options: data.organic.slice(0, 3).map(o => ({
-          url: o.link,
-          title: o.title || o.link,
-        })),
-      });
+      const options = data.organic
+        .sort((a,b) => rank(a.link) - rank(b.link))
+        .slice(0,3)
+        .map(o => ({ url: o.link, title: o.title || o.link }));
+      keywords.push({ keyword: kw, options });
     }
 
-    return res.status(200).json({ topics, keywords: result, original: text });
+    return res.status(200).json({ topics, keywords, original: text });
   } catch (e) {
-    console.error("ai.js error", e);
-    return res.status(500).json({ error: e.message });
+    console.error("ai.js error:", e);
+    res.status(500).json({ error: e.message });
   }
 }
