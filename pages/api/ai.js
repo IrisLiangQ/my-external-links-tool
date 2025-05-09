@@ -83,4 +83,10 @@ Paragraph:
     return res.status(200).json({
       topic,
       keywords: result,
-      original
+      original: text,
+    });
+  } catch (e) {
+    console.error("ai.js ERROR:", e);
+    return res.status(500).json({ error: e.message });
+  }
+}
