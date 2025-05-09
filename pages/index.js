@@ -1,97 +1,127 @@
 import { useState, useRef } from "react";
 import { FiCopy } from "react-icons/fi";
 
+/* ---------------- 组件 ---------------- */
 export default function Home() {
-  const [raw, setRaw] = useState("");
-  const [data, setData] = useState(null);          // {topics, keywords, original}
-  const [html, setHtml] = useState("");
-  const [picked, setPicked] = useState({});        // {kw:{url,reason,no}}
-  const [active, setActive] = useState(null);      // 当前展开关键词
+  /* 状态 */
+  const [raw, setRaw]       = useState("");
+  const [data, setData]     = useState(null);   // {topics, keywords, original}
+  const [html, setHtml]     = useState("");
+  const [picked, setPicked] = useState({});     // {kw:{url,reason,no}}
+  const [active, setActive] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied]   = useState(false);
+
   const popRef = useRef(null);
 
-  /* -------- 调 /api/ai -------- */
+  /* ------------ 调 /api/ai ------------- */
   async function analyze() {
-    if (!raw.trim()) return alert("请先粘贴文本！");
+    if (!raw.trim()) return alert("请先粘贴英文段落！");
     setLoading(true);
     const r = await fetch("/api/ai", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: raw }),
     });
     if (!r.ok) { alert("分析失败"); setLoading(false); return; }
     const j = await r.json();
     setData(j); setPicked({}); setCopied(false);
 
+    /* 高亮关键词：绿色虚线下划线 + ▾ */
     let body = j.original;
     j.keywords.forEach(({ keyword }) => {
-      if (body.includes(`data-kw="${keyword}"`)) return; // 去重高亮
+      if (body.includes(`data-kw="${keyword}"`)) return;   // 去重
       const reg = new RegExp(`\\b${keyword}\\b`, "i");
       body = body.replace(
         reg,
-        `<span class="kw"><a data-kw="${keyword}" class="underline decoration-green-500">${keyword}</a><sup class="caret">▾</sup></span>`
+        `<span class="kw">` +
+          `<a data-kw="${keyword}" class="border-b border-dashed border-green-600">${keyword}</a>` +
+          `<sup class="caret">▾</sup></span>`
       );
     });
-    setHtml(body); setLoading(false);
+    setHtml(body);
+    setLoading(false);
   }
 
-  /* -------- 点击关键词 -------- */
-  function onClick(e) {
+  /* ------------ 点击关键词 ------------ */
+  function onClickEditor(e) {
     const el = e.target.closest("a[data-kw]");
     if (!el) return;
     const kw = el.dataset.kw;
     setActive(active === kw ? null : kw);
+
     if (popRef.current) {
       const rc = el.getBoundingClientRect();
       popRef.current.style.top  = `${rc.bottom + window.scrollY + 6}px`;
-      popRef.current.style.left = `${rc.left + rc.width/2 + window.scrollX}px`;
+      popRef.current.style.left = `${rc.left + rc.width / 2 + window.scrollX}px`;
       popRef.current.style.transform = "translateX(-50%)";
     }
   }
 
-  /* -------- 选链接 -------- */
+  /* ------------ 选中外链 ------------ */
   async function chooseLink(kw, opt) {
     if (picked[kw]) return;
+
+    /* 后端要理由 */
     let reason = "";
     try {
       const r = await fetch("/api/reason", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: opt.url, phrase: kw }),
       });
       if (r.ok) reason = (await r.json()).reason;
     } catch (e) { console.error(e); }
-    if (!reason) reason = "credible source";
+    if (!reason) reason = "authoritative reference";
 
+    /* 脚注号 */
     const no = Object.keys(picked).length + 1;
     setPicked(p => ({ ...p, [kw]: { ...opt, reason, no } }));
 
-    setHtml(prev => prev.replace(
-      new RegExp(`<span class="kw"><a[^>]*data-kw="${kw}"[^>]*>.*?<\\/a><sup class="caret">▾<\\/sup><\\/span>`,"i"),
-      `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a><sup id="fnref-${no}">[${no}]</sup>`
-    ));
+    /* 替换 mark */
+    const reg = new RegExp(
+      `<span class="kw"><a[^>]*data-kw="${kw}"[^>]*>.*?<\\/a><sup class="caret">▾<\\/sup><\\/span>`,
+      "i"
+    );
+    const anchor =
+      `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a>` +
+      `<sup id="fnref-${no}">[${no}]</sup>`;
+    setHtml(prev => prev.replace(reg, anchor));
+
     setActive(null);
   }
 
-  /* -------- 复制输出 HTML -------- */
-  function copyOut() {
-    let final = html;
-    if (Object.keys(picked).length) {
-      final += "<hr><ol>";
-      Object.values(picked)
-        .sort((a,b)=>a.no-b.no)
-        .forEach(p=>{
-          final += `<li id="fn-${p.no}">${p.reason} <a href="#fnref-${p.no}">↩</a></li>`;
-        });
-      final += "</ol>";
+  /* ------------ 复制 HTML ------------ */
+  function copyHtml() {
+    /* 无已选链接时提示 */
+    if (Object.keys(picked).length === 0) {
+      alert("请先点击关键词并选择外链，再复制 HTML");
+      return;
     }
+
+    /* 去掉残余占位 span */
+    let final = html.replace(
+      /<span class="kw"><a [^>]+>(.*?)<\/a><sup class="caret">▾<\/sup><\/span>/g,
+      "$1"
+    );
+
+    /* 拼脚注 */
+    final += "<hr><ol>";
+    Object.values(picked)
+      .sort((a,b)=>a.no-b.no)
+      .forEach(p=>{
+        final += `<li id="fn-${p.no}">${p.reason} <a href="#fnref-${p.no}">↩</a></li>`;
+      });
+    final += "</ol>";
+
     navigator.clipboard.writeText(final);
     setCopied(true); setTimeout(()=>setCopied(false),2000);
   }
 
-  /* ------------------- UI ------------------- */
+  /* ---------------- 渲染 ---------------- */
   return (
     <div className="min-h-screen flex flex-col items-center py-10 px-4 bg-gray-50">
-      {/* 顶部 Logo */}
+      {/* Header */}
       <header className="text-center mb-6">
         <h1 className="text-3xl font-bold flex items-center justify-center gap-2">
           <span className="text-orange-500">⚡</span> 外链优化
@@ -99,11 +129,11 @@ export default function Home() {
         <p className="text-sm text-gray-500">AI驱动的文章外链优化工具</p>
       </header>
 
-      {/* 主卡片 */}
+      {/* Card */}
       <div className="w-full max-w-5xl bg-white shadow rounded-2xl p-8 space-y-6">
         {/* 主题 badge */}
         {data?.topics && (
-          <div className="flex gap-2 flex-wrap text-sm">
+          <div className="flex gap-2 flex-wrap items-center text-sm mb-2">
             <span className="text-gray-600">主题:</span>
             {data.topics.map(t=>(
               <span key={t} className="bg-gray-200 px-2 rounded">{t}</span>
@@ -111,7 +141,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* 输入 / 编辑 */}
         {!data ? (
           <>
             <textarea
@@ -132,10 +161,13 @@ export default function Home() {
         ) : (
           <>
             <h2 className="font-semibold text-lg">文本编辑器</h2>
+            <p className="text-xs text-gray-500 mb-2">
+              点击关键词可预览，复制后可直接使用
+            </p>
             <div
               className="prose max-w-none border rounded-md p-4 md:px-6"
               dangerouslySetInnerHTML={{ __html: html }}
-              onClick={onClick}
+              onClick={onClickEditor}
             />
 
             {/* 推荐理由 */}
@@ -152,9 +184,10 @@ export default function Home() {
               </section>
             )}
 
-            <div className="text-right">
+            {/* Copy Button */}
+            <div className="text-right mt-6">
               <button
-                onClick={copyOut}
+                onClick={copyHtml}
                 className="inline-flex items-center gap-2 px-6 py-2 bg-black text-white rounded"
               >
                 <FiCopy/>{copied ? "Copied!" : "Copy HTML"}
