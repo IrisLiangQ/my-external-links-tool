@@ -1,26 +1,22 @@
 import { useState, useRef } from "react";
 import { FiCopy } from "react-icons/fi";
 
-/* ---------- util ---------- */
-const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/* 生成绿色高亮 */
 function highlight(original, kwArr) {
   const sorted = [...kwArr].sort((a, b) => b.length - a.length);
-  let html = original.replace(/(<[^>]+>)/g, "\u0000$1\u0000").split("\u0000");
-
   const green =
     "display:inline-flex;background:#ecfdf5;color:#065f46;" +
     "border:1px solid #bbf7d0;padding:0 2px;border-radius:4px;cursor:pointer";
 
-  sorted.forEach((k) => {
+  let html = original.replace(/(<[^>]+>)/g, "\u0000$1\u0000").split("\u0000");
+  sorted.forEach(k => {
     const re = new RegExp(esc(k).replace(/\s+/g, "\\s+"), "gi");
-    html = html.map((p) =>
+    html = html.map(p =>
       p.startsWith("<") || p.includes(`data-kw="${k}"`)
         ? p
-        : p.replace(
-            re,
-            (m) => `<span data-kw="${k}" style="${green}">${m}</span>`
-          )
+        : p.replace(re, m => `<span data-kw="${k}" style="${green}">${m}</span>`)
     );
   });
   return html.join("");
@@ -37,7 +33,6 @@ export default function Home() {
 
   const popRef = useRef(null);
 
-  /* ---------- /api/ai ---------- */
   async function analyze() {
     if (!raw.trim()) return alert("请先粘贴英文段落！");
     setLoading(true);
@@ -46,43 +41,32 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: raw }),
     });
-    if (!r.ok) {
-      alert("AI 分析失败");
-      setLoading(false);
-      return;
-    }
+    if (!r.ok) return alert("AI 分析失败");
     const j = await r.json();
     const kwArr = j.keywords
-      .map((k) =>
-        typeof k === "string" ? k : k.keyword || k.kw || k.phrase || ""
-      )
+      .map(k => (typeof k === "string" ? k : k.keyword || k.phrase || ""))
       .filter(Boolean);
 
     setData({ ...j, kwArr });
-    setCnt(0);
-    setCopied(false);
     setHtml(highlight(j.original, kwArr));
+    setCnt(0);
     setLoading(false);
   }
 
-  /* ---------- editor click ---------- */
   function onClickEditor(e) {
     const span = e.target.closest("span[data-kw]");
     if (!span) return;
     const kw = span.dataset.kw;
-    setActive((prev) => (prev === kw ? null : kw));
+    setActive(prev => (prev === kw ? null : kw));
 
     if (popRef.current) {
       const rc = span.getBoundingClientRect();
       popRef.current.style.top = `${rc.bottom + window.scrollY + 6}px`;
-      popRef.current.style.left = `${
-        rc.left + rc.width / 2 + window.scrollX
-      }px`;
+      popRef.current.style.left = `${rc.left + rc.width / 2 + window.scrollX}px`;
       popRef.current.style.transform = "translateX(-50%)";
     }
   }
 
-  /* ---------- choose / remove ---------- */
   async function chooseLink(kw, opt) {
     if (!opt) {
       const green =
@@ -92,10 +76,10 @@ export default function Home() {
         `<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>`,
         "gi"
       );
-      setHtml((p) =>
+      setHtml(p =>
         p.replace(reg, `<span data-kw="${kw}" style="${green}">${kw}</span>`)
       );
-      setCnt((c) => Math.max(0, c - 1));
+      setCnt(c => Math.max(0, c - 1));
       setActive(null);
       return;
     }
@@ -115,31 +99,29 @@ export default function Home() {
       "display:inline-flex;background:#dbeafe;color:#1e3a8a;" +
       "border:1px solid #bfdbfe;padding:0 2px;border-radius:4px;cursor:pointer";
 
-    const replacement =
+    const repl =
       `<span data-kw="${kw}">` +
       `<a href="${opt.url}" target="_blank" rel="noopener" ` +
       `style="${blue};text-decoration:underline;font-weight:700">${kw}</a>` +
       `</span> ((${reason}))`;
 
     const regSel = new RegExp(
-      `<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>\\s*(\\(\\(.*?\\)\\))?`,
+      `<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>(\\s*\\(\\(.*?\\)\\))?`,
       "gi"
     );
-    setHtml((p) => {
-      const picked = /#dbeafe/.test(p.match(regSel)?.[0] || "");
-      if (!picked) setCnt((c) => c + 1);
-      return p.replace(regSel, replacement);
+    setHtml(p => {
+      if (!/#dbeafe/.test(p.match(regSel)?.[0] || "")) setCnt(c => c + 1);
+      return p.replace(regSel, repl);
     });
     setActive(null);
   }
 
-  /* ---------- copy ---------- */
   function copyHtml() {
-    const out = html.replace(
+    const clean = html.replace(
       /<span[^>]*data-kw="[^"]+"[^>]*>(.*?)<\/span>/g,
       "$1"
     );
-    navigator.clipboard.writeText(out);
+    navigator.clipboard.writeText(clean);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -150,14 +132,11 @@ export default function Home() {
       className="min-h-screen flex flex-col items-center py-10 px-4"
       style={{ fontFamily: '"Microsoft YaHei", sans-serif' }}
     >
-      <header className="text-center mb-6">
-        <h1 className="text-2xl font-bold flex items-center justify-center gap-2">
-          <span style={{ color: "#f97316" }}>⚡</span> 外链优化
-        </h1>
-        <p className="text-sm text-gray-500">AI驱动的文章外链优化工具</p>
-      </header>
+      <h1 className="text-2xl font-bold mb-6">
+        <span style={{ color: "#f97316" }}>⚡</span> 外链优化
+      </h1>
 
-      <div className="w-full max-w-5xl border rounded-xl p-8 space-y-6">
+      <div className="w-full max-w-4xl border rounded-xl p-8 space-y-6">
         {!data ? (
           <>
             <textarea
@@ -165,13 +144,12 @@ export default function Home() {
               className="w-full border rounded p-3"
               placeholder="Paste English paragraph…"
               value={raw}
-              onChange={(e) => setRaw(e.target.value)}
-              style={{ fontFamily: '"Microsoft YaHei", sans-serif' }}
+              onChange={e => setRaw(e.target.value)}
             />
             <button
               onClick={analyze}
               disabled={loading}
-              className="px-6 py-2 rounded"                {/* 不再带 Tailwind 蓝色类 */}
+              className="px-6 py-2 rounded"
               style={{
                 background: loading ? "#94a3b8" : "#000",
                 color: "#fff",
@@ -183,8 +161,7 @@ export default function Home() {
           </>
         ) : (
           <>
-            <p className="font-semibold mb-1">文本编辑器</p>
-            <p className="text-xs text-gray-600 mb-3">
+            <p className="text-xs text-gray-600 mb-2">
               绿色块可添加外链；选后变蓝，可再次点击修改或移除。
             </p>
 
@@ -194,7 +171,7 @@ export default function Home() {
               onClick={onClickEditor}
             />
 
-            <div className="text-right mt-4">
+            <div className="text-right">
               <button
                 disabled={pickedCnt === 0}
                 onClick={copyHtml}
@@ -212,7 +189,6 @@ export default function Home() {
         )}
       </div>
 
-      {/* popup */}
       {active && (
         <div
           ref={popRef}
@@ -229,10 +205,10 @@ export default function Home() {
           }}
         >
           {data.keywords
-            .find((k) => (k.keyword || k.kw || k.phrase || k) === active)
-            ?.options.map((o, i) => (
+            .find(k => (k.keyword || k) === active)
+            ?.options.map(o => (
               <button
-                key={i}
+                key={o.url}
                 onClick={() => chooseLink(active, o)}
                 style={{
                   display: "block",
