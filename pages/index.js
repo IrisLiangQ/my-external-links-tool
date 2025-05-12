@@ -1,37 +1,44 @@
 import { useState, useRef } from "react";
 import { FiCopy } from "react-icons/fi";
 
-/* util -------------------------------------------------------- */
-const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const green =
+/* ------------------------------------------------ util */
+const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");        // 转义正则
+const kwStyle =
   "display:inline-flex;background:#ecfdf5;color:#065f46;" +
   "border:1px solid #bbf7d0;padding:0 2px;border-radius:4px;cursor:pointer";
-function highlight(text, kws) {
-  const list = [...kws].sort((a, b) => b.length - a.length);
-  let html = text.replace(/(<[^>]+>)/g, "\0$1\0").split("\0");
+
+/* 仅给 “第一次出现” 包 span，其余保持原文 ---------------------- */
+function highlight(body, kwArr) {
+  const list = [...kwArr].sort((a, b) => b.length - a.length);    // 长词优先
+  let html = body.replace(/(<[^>]+>)/g, "\0$1\0").split("\0");    // 暂时断开 html 标签
   list.forEach(k => {
+    let first = false;
     const re = new RegExp(esc(k).replace(/\s+/g, "\\s+"), "gi");
-    html = html.map(p =>
-      p.startsWith("<") || p.includes(`data-kw="${k}"`)
-        ? p
-        : p.replace(re, m => `<span data-kw="${k}" style="${green}">${m}</span>`)
+    html = html.map(chunk =>
+      chunk.startsWith("<") || chunk.includes(`data-kw="${k}"`)
+        ? chunk
+        : chunk.replace(re, m => {
+            if (first) return m;
+            first = true;
+            return `<span data-kw="${k}" style="${kwStyle}">${m}</span>`;
+          })
     );
   });
   return html.join("");
 }
 
+/* ------------------------------------------------ component */
 export default function Home() {
-  /* state ------------------------------------------------------ */
   const [raw, setRaw] = useState("");
-  const [data, setData] = useState(null);          // ai 返回
-  const [html, setHtml] = useState("");            // 编辑区 innerHTML
-  const [active, setActive] = useState(null);      // 当前弹窗 kw
+  const [data, setData] = useState(null);                  // {original, kwArr, keywords}
+  const [html, setHtml] = useState("");
+  const [active, setActive] = useState(null);              // 当前弹窗 keyword
   const [loading, setLoading] = useState(false);
   const [pickedCnt, setCnt] = useState(0);
   const [copied, setCopied] = useState(false);
   const popRef = useRef(null);
 
-  /* AI --------------------------------------------------------- */
+  /* ---------------- 调 /api/ai ---------------- */
   async function analyze() {
     if (!raw.trim()) return alert("请先粘贴英文段落！");
     setLoading(true);
@@ -51,9 +58,9 @@ export default function Home() {
     setLoading(false);
   }
 
-  /* 编辑区点击 -------------------------------------------------- */
+  /* ---------------- 点击编辑区 ---------------- */
   function onClickEditor(e) {
-    if (e.ctrlKey || e.metaKey) return;            // 允许 ctrl 新标签
+    if (e.ctrlKey || e.metaKey) return;                     // 允许 ctrl+click
     const span = e.target.closest("span[data-kw]");
     if (!span) return;
     e.preventDefault();
@@ -68,23 +75,30 @@ export default function Home() {
     }
   }
 
-  /* 选择 / 移除 -------------------------------------------------- */
+  /* ---------------- 选择/移除链接 ---------------- */
   async function chooseLink(kw, opt) {
-    /* 移除外链 ---------------- */
+    /* === 移除 === */
     if (!opt) {
       const reg = new RegExp(
-        `<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>(\\s*\\(\\(.*?\\)\\))?`,
+        `<a[^>]*>${esc(kw)}<\\/a>(\\s*\\(\\(.*?\\)\\))?`,
+        "gi"
+      );
+      const regSpan = new RegExp(
+        `<span[^>]*data-kw="${esc(kw)}"[^>]*>(.*?)<\\/span>`,
         "gi"
       );
       setHtml(p =>
-        p.replace(reg, `<span data-kw="${kw}" style="${green}">${kw}</span>`)
+        highlight(
+          p.replace(reg, kw).replace(regSpan, kw),          // 还原成裸文本
+          [kw]
+        )
       );
       setCnt(c => Math.max(0, c - 1));
       setActive(null);
       return;
     }
 
-    /* 生成 reason -------------- */
+    /* === reason === */
     let reason = "";
     try {
       const r = await fetch("/api/reason", {
@@ -96,54 +110,59 @@ export default function Home() {
     } catch {}
     if (!reason) reason = "authoritative source";
 
+    /* link style */
     const blue =
-      "display:inline-flex;background:#dbeafe;color:#1e3a8a;" +
-      "border:1px solid #bfdbfe;padding:0 2px;border-radius:4px;cursor:pointer";
-    const repl =
-      `<span data-kw="${kw}">` +
-      `<a href="${opt.url}" target="_blank" rel="noopener" ` +
-      `style="${blue};text-decoration:underline;font-weight:700">` +
-      `${kw}</a><sup style="margin-left:2px">▾</sup></span> ((${reason}))`;
+      "background:#dbeafe;color:#1e3a8a;" +
+      "border:1px solid #bfdbfe;padding:0 2px;border-radius:4px;" +
+      "text-decoration:underline;font-weight:700";
 
-    const reg = new RegExp(
-      `<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>(\\s*\\(\\(.*?\\)\\))?`,
-      "gi"
-    );
-    setHtml(p => {
-      if (!/#dbeafe/.test(p.match(reg)?.[0] || "")) setCnt(c => c + 1);
-      return p.replace(reg, repl);
+    const linkHTML =
+      `<a href="${opt.url}" target="_blank" rel="noopener" style="${blue}">${kw}</a>` +
+      `<sup style="margin-left:2px">▾</sup>`;
+
+    setHtml(prev => {
+      /* 把首次 span → link+reason */
+      let out = prev.replace(
+        new RegExp(
+          `<span[^>]*data-kw="${esc(kw)}"[^>]*>(.*?)</span>`,
+          "i"
+        ),
+        `${linkHTML} ((${reason}))`
+      );
+      /* 其余裸文本全部同步替换成 link（不附 reason） */
+      const bare = new RegExp(`\\b${esc(kw)}\\b`, "gi");
+      out = out.replace(bare, linkHTML);
+      setCnt(c => (c ? c : 1));            // 首次统计
+      return out;
     });
     setActive(null);
   }
 
-  /* 复制 -------------------------------------------------------- */
+  /* ---------------- 复制 ---------------- */
   function copyHtml() {
-    const out = html.replace(
-      /<span[^>]*data-kw="[^"]+"[^>]*>(.*?)<\/span>/g,
-      "$1"
-    );
-    navigator.clipboard.writeText(out);
+    const clean = html.replace(/<span[^>]*>|\<\/span>/g, "");      // 移除 kw span
+    navigator.clipboard.writeText(clean);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
 
-  /* ----------------------------- render ----------------------- */
+  /* ---------------- render ---------------- */
   return (
     <div
       style={{
         fontFamily: '"Microsoft YaHei", system-ui, sans-serif',
-        padding: "32px"
+        padding: 32
       }}
     >
-      {/* -------- 顶部 logo -------- */}
+      {/* 顶部 */}
       <header style={{ maxWidth: 1040, margin: "0 auto 24px" }}>
         <h1
           style={{
             fontSize: 32,
             fontWeight: 700,
             display: "flex",
-            alignItems: "center",
-            gap: 8
+            gap: 8,
+            alignItems: "center"
           }}
         >
           <span style={{ color: "#f97316" }}>⚡</span> 外链优化
@@ -153,7 +172,7 @@ export default function Home() {
         </p>
       </header>
 
-      {/* -------- 卡片容器 -------- */}
+      {/* 卡片 */}
       <div
         style={{
           maxWidth: 1040,
@@ -164,6 +183,7 @@ export default function Home() {
           padding: 32
         }}
       >
+        {/* 输入阶段 */}
         {!data ? (
           <>
             <textarea
@@ -196,6 +216,7 @@ export default function Home() {
             </button>
           </>
         ) : (
+          /* 编辑阶段 */
           <>
             <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
               绿色块可添加外链；选后变蓝，可再次点击修改或移除。
@@ -205,7 +226,8 @@ export default function Home() {
                 border: "1px solid #e5e7eb",
                 borderRadius: 8,
                 padding: 16,
-                lineHeight: 1.6
+                lineHeight: 1.6,
+                minHeight: 120
               }}
               dangerouslySetInnerHTML={{ __html: html }}
               onClick={onClickEditor}
@@ -233,7 +255,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* -------- 弹窗 -------- */}
+      {/* 弹窗 */}
       {active && (
         <div
           ref={popRef}
@@ -245,8 +267,7 @@ export default function Home() {
             borderRadius: 12,
             boxShadow: "0 6px 24px rgba(0,0,0,.12)",
             border: "1px solid #e5e7eb",
-            overflow: "hidden",
-            fontFamily: '"Microsoft YaHei", sans-serif'
+            overflow: "hidden"
           }}
         >
           {data.keywords
@@ -260,8 +281,7 @@ export default function Home() {
                   width: "100%",
                   textAlign: "left",
                   padding: 16,
-                  borderBottom: "1px solid #f3f4f6",
-                  cursor: "pointer"
+                  borderBottom: "1px solid #f3f4f6"
                 }}
               >
                 <p
@@ -294,8 +314,7 @@ export default function Home() {
               width: "100%",
               padding: 12,
               fontSize: 14,
-              color: "#dc2626",
-              cursor: "pointer"
+              color: "#dc2626"
             }}
           >
             ✕ 移除外链
