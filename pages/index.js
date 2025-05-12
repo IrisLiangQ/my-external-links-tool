@@ -1,10 +1,10 @@
 import { useState, useRef } from "react";
 import { FiCopy } from "react-icons/fi";
 
-/* ---------------- helpers ---------------- */
+/* ---------------- utils ---------------- */
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/* stash & restore ((reason)) blocks so they are never scanned */
+/* 将 ((reason)) 暂存，避免被高亮正则误替换 */
 function stashReason(text) {
   const stash = [];
   const html = text.replace(/\(\([\s\S]*?\)\)/g, m => {
@@ -17,115 +17,110 @@ function stashReason(text) {
 const restoreReason = (text, stash) =>
   text.replace(/¤¤(\d+)¤¤/g, (_, i) => stash[+i]);
 
-/* only first occurrence of each keyword is wrapped */
-function highlight(body, kwArr) {
+/* 仅高亮每个关键词的首处出现 */
+function highlight(body, kws) {
   const { html: raw, stash } = stashReason(body);
-
   const seen = new Set();
-  const list = [...kwArr]
+  const ordered = [...kws]
+    .filter(Boolean)
     .filter(k => {
-      const low = k.toLowerCase();
-      if (seen.has(low)) return false;
-      seen.add(low);
+      const l = k.toLowerCase();
+      if (seen.has(l)) return false;
+      seen.add(l);
       return true;
     })
-    .sort((a, b) => b.length - a.length);
+    .sort((a, b) => b.length - a.length); // 长词优先
 
-  const spanStyle =
+  const spanBase =
     "display:inline-flex;background:#ecfdf5;color:#065f46;" +
-    "border:1px solid #bbf7d0;padding:0 2px;border-radius:4px;cursor:pointer";
+    "border:1px solid #bbf7d0;border-radius:4px;padding:0 2px;cursor:pointer";
 
-  let html = raw.replace(/(<[^>]+>)/g, "\0$1\0").split("\0");
-  list.forEach(k => {
-    let done = false;
-    const re = new RegExp(`\\b${esc(k)}\\b`, "i");
-    html = html.map(chunk =>
-      chunk.startsWith("<") || chunk.includes(`data-kw="${k}"`)
-        ? chunk
-        : chunk.replace(re, m => {
-            if (done) return m;
-            done = true;
-            return `<span data-kw="${k}" style="${spanStyle}">${m}</span>`;
+  let parts = raw.replace(/(<[^>]+>)/g, "\0$1\0").split("\0");
+  ordered.forEach(kw => {
+    let first = true;
+    const re = new RegExp(`\\b${esc(kw)}\\b`, "i");
+    parts = parts.map(p =>
+      p.startsWith("<")
+        ? p
+        : p.replace(re, m => {
+            if (!first) return m;
+            first = false;
+            return `<span data-kw="${kw}" style="${spanBase}">${m}</span>`;
           })
     );
   });
-
-  return restoreReason(html.join(""), stash);
+  return restoreReason(parts.join(""), stash);
 }
 
 /* ---------------- component ---------------- */
 export default function Home() {
   const [raw, setRaw] = useState("");
-  const [data, setData] = useState(null);           // AI result with kwArr
+  const [data, setData] = useState(null);           // { kwArr, keywords, original }
   const [html, setHtml] = useState("");
-  const [active, setActive] = useState(null);       // current keyword in popup
+  const [active, setActive] = useState(null);
+  const [picked, setPicked] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [picked, setPicked] = useState(false);      // at least one link chosen?
   const [copied, setCopied] = useState(false);
-  const popRef = useRef(null);
+  const pop = useRef(null);
 
-  /* ------------ call AI ------------- */
+  /* ---------- 调 /api/ai ---------- */
   async function analyze() {
     if (!raw.trim()) return alert("请先粘贴英文段落！");
     setLoading(true);
-    const res = await fetch("/api/ai", {
+    const r = await fetch("/api/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: raw })
     });
-    if (!res.ok) {
+    if (!r.ok) {
       setLoading(false);
-      return alert("AI 分析失败");
+      return alert("服务器分析失败");
     }
-    const j = await res.json();
-    const kwArr = j.keywords
-      .map(k => (typeof k === "string" ? k : k.keyword || k.phrase || ""))
-      .filter(Boolean);
+    const j = await r.json();
+    const kwArr = j.keywords.map(k => (typeof k === "string" ? k : k.keyword));
     setData({ ...j, kwArr });
     setHtml(highlight(j.original, kwArr));
     setPicked(false);
     setLoading(false);
   }
 
-  /* ------------ editor click -------- */
+  /* ---------- 点击编辑区 ---------- */
   function onClickEditor(e) {
-    if (e.ctrlKey || e.metaKey) return;           // allow ctrl/cmd open
     const span = e.target.closest("span[data-kw]");
     if (!span) return;
-    e.preventDefault();
     const kw = span.dataset.kw;
     setActive(prev => (prev === kw ? null : kw));
-    if (popRef.current) {
+    if (pop.current) {
       const rc = span.getBoundingClientRect();
-      popRef.current.style.top = `${rc.bottom + window.scrollY + 6}px`;
-      popRef.current.style.left = `${rc.left + rc.width / 2 + window.scrollX}px`;
-      popRef.current.style.transform = "translateX(-50%)";
+      pop.current.style.top = `${rc.bottom + window.scrollY + 6}px`;
+      pop.current.style.left = `${rc.left + rc.width / 2 + window.scrollX}px`;
+      pop.current.style.transform = "translateX(-50%)";
     }
   }
 
-  /* ------------ choose / remove link ------------- */
+  /* ---------- 选择 / 移除 外链 ---------- */
   async function chooseLink(kw, opt) {
-    /* 取消外链 → 恢复绿色块 */
+    /* === 移除 === */
     if (!opt) {
-      const greenStyle =
+      const green =
         "display:inline-flex;background:#ecfdf5;color:#065f46;" +
-        "border:1px solid #bbf7d0;padding:0 2px;border-radius:4px;cursor:pointer";
-      const regFirst = new RegExp(
-        `<a[^>]*>${esc(kw)}<\\/a><sup[^>]*>▾<\\/sup>\\s*\\(\\(.*?\\)\\)`,
+        "border:1px solid #bbf7d0;border-radius:4px;padding:0 2px;cursor:pointer";
+      const reg = new RegExp(
+        `<span data-kw="${esc(kw)}"[^>]*>\\s*<a[^>]+>${esc(kw)}<\\/a>.*?<\\/span>`,
         "i"
       );
       setHtml(p =>
         p.replace(
-          regFirst,
-          `<span data-kw="${kw}" style="${greenStyle}">${kw}</span>`
+          reg,
+          `<span data-kw="${kw}" style="${green}">${kw}</span>`
         )
       );
-      setPicked(false);
       setActive(null);
+      setPicked(false);
       return;
     }
 
-    /* 获取 reason */
+    /* === 获取 reason === */
     let reason = "";
     try {
       const r = await fetch("/api/reason", {
@@ -137,16 +132,22 @@ export default function Home() {
     } catch {}
     if (!reason) reason = "authoritative source";
 
-    const linkStyle =
-      "background:#dbeafe;color:#1e3a8a;border:1px solid #bfdbfe;" +
-      "padding:0 2px;border-radius:4px;text-decoration:underline;font-weight:700";
+    /* 包裹 span 保留 data-kw，方便再编辑 */
     const link =
-      `<a href="${opt.url}" target="_blank" rel="noopener" style="${linkStyle}">${kw}</a>` +
-      `<sup style="margin-left:2px">▾</sup> ((${reason}))`;
+      `<span data-kw="${kw}" ` +
+      `style="background:#dbeafe;color:#1e3a8a;border:1px solid #bfdbfe;` +
+      `border-radius:4px;padding:0 2px;cursor:pointer">` +
+      `<a href="${opt.url}" target="_blank" rel="noopener" ` +
+      `style="color:inherit;text-decoration:underline;font-weight:700">${kw}</a>` +
+      `<sup style="margin-left:2px">▾</sup> ((${reason}))` +
+      `</span>`;
 
-    setHtml(prev =>
-      prev.replace(
-        new RegExp(`<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>`, "i"),
+    setHtml(p =>
+      p.replace(
+        new RegExp(
+          `<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>`,
+          "i"
+        ),
         link
       )
     );
@@ -154,22 +155,39 @@ export default function Home() {
     setActive(null);
   }
 
-  /* ------------ copy HTML ------------ */
+  /* ---------- 复制 ---------- */
   function copyHtml() {
-    navigator.clipboard.writeText(html.replace(/<span[^>]*>|<\/span>/g, ""));
+    navigator.clipboard.writeText(
+      html.replace(/<span[^>]*>|<\/span>/g, "")
+    );
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
 
-  /* ---------------- render ---------------- */
+  /* ---------- UI ---------- */
+  const btn = {
+    padding: "10px 24px",
+    fontWeight: 700,
+    borderRadius: 6,
+    background: "#000",
+    color: "#fff"
+  };
+
   return (
-    <div style={{ fontFamily: '"Microsoft YaHei", system-ui, sans-serif', padding: 32 }}>
+    <div
+      style={{
+        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+        padding: 32
+      }}
+    >
       {/* header */}
       <header style={{ maxWidth: 1040, margin: "0 auto 24px" }}>
         <h1 style={{ fontSize: 32, fontWeight: 700, display: "flex", gap: 8 }}>
           <span style={{ color: "#f97316" }}>⚡</span> 外链优化
         </h1>
-        <p style={{ fontSize: 14, color: "#6b7280", marginTop: 4 }}>AI驱动的文章外链优化工具</p>
+        <p style={{ fontSize: 14, color: "#6b7280", marginTop: 4 }}>
+          AI驱动的文章外链优化工具
+        </p>
       </header>
 
       {/* card */}
@@ -183,7 +201,6 @@ export default function Home() {
           padding: 32
         }}
       >
-        {/* 输入阶段 */}
         {!data ? (
           <>
             <textarea
@@ -202,21 +219,12 @@ export default function Home() {
             <button
               onClick={analyze}
               disabled={loading}
-              style={{
-                marginTop: 16,
-                padding: "10px 24px",
-                background: "#000",
-                opacity: loading ? 0.5 : 1,
-                color: "#fff",
-                fontWeight: 700,
-                borderRadius: 6
-              }}
+              style={{ ...btn, opacity: loading ? 0.5 : 1, marginTop: 16 }}
             >
               {loading ? "Analyzing…" : "分析关键词"}
             </button>
           </>
         ) : (
-          /* 编辑阶段 */
           <>
             <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
               绿色块可添加外链；选后变蓝，可再次点击修改或移除。
@@ -237,14 +245,12 @@ export default function Home() {
                 disabled={!picked}
                 onClick={copyHtml}
                 style={{
-                  padding: "10px 24px",
-                  background: picked ? "#000" : "#9ca3af",
-                  color: "#fff",
-                  fontWeight: 700,
-                  borderRadius: 6
+                  ...btn,
+                  background: picked ? "#000" : "#9ca3af"
                 }}
               >
-                <FiCopy /> {copied ? "Copied!" : "确认选择"}
+                <FiCopy style={{ marginRight: 6 }} />
+                {copied ? "Copied!" : "确认选择"}
               </button>
             </div>
           </>
@@ -254,7 +260,7 @@ export default function Home() {
       {/* popup */}
       {active && (
         <div
-          ref={popRef}
+          ref={pop}
           style={{
             position: "fixed",
             zIndex: 50,
