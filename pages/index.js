@@ -1,9 +1,10 @@
 import { useState, useRef } from "react";
 import { FiCopy } from "react-icons/fi";
 
-const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/* ---------- util ---------- */
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/* 生成绿色高亮 */
+/* 绿色高亮 */
 function highlight(original, kwArr) {
   const sorted = [...kwArr].sort((a, b) => b.length - a.length);
   const green =
@@ -11,28 +12,32 @@ function highlight(original, kwArr) {
     "border:1px solid #bbf7d0;padding:0 2px;border-radius:4px;cursor:pointer";
 
   let html = original.replace(/(<[^>]+>)/g, "\u0000$1\u0000").split("\u0000");
-  sorted.forEach(k => {
+  sorted.forEach((k) => {
     const re = new RegExp(esc(k).replace(/\s+/g, "\\s+"), "gi");
-    html = html.map(p =>
+    html = html.map((p) =>
       p.startsWith("<") || p.includes(`data-kw="${k}"`)
         ? p
-        : p.replace(re, m => `<span data-kw="${k}" style="${green}">${m}</span>`)
+        : p.replace(
+            re,
+            (m) => `<span data-kw="${k}" style="${green}">${m}</span>`
+          )
     );
   });
   return html.join("");
 }
 
 export default function Home() {
-  const [raw, setRaw] = useState("");
-  const [data, setData] = useState(null);
-  const [html, setHtml] = useState("");
+  const [raw, setRaw]       = useState("");
+  const [data, setData]     = useState(null);
+  const [html, setHtml]     = useState("");
   const [active, setActive] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [pickedCnt, setCnt] = useState(0);
-  const [copied, setCopied] = useState(false);
+  const [pickedCnt, setCnt]   = useState(0);
+  const [copied, setCopied]   = useState(false);
 
   const popRef = useRef(null);
 
+  /* ---------- 调 /api/ai ---------- */
   async function analyze() {
     if (!raw.trim()) return alert("请先粘贴英文段落！");
     setLoading(true);
@@ -41,49 +46,58 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: raw }),
     });
-    if (!r.ok) return alert("AI 分析失败");
+    if (!r.ok) { alert("AI 分析失败"); setLoading(false); return; }
+
     const j = await r.json();
     const kwArr = j.keywords
-      .map(k => (typeof k === "string" ? k : k.keyword || k.phrase || ""))
+      .map((k) => (typeof k === "string" ? k : k.keyword || k.phrase || ""))
       .filter(Boolean);
 
     setData({ ...j, kwArr });
     setHtml(highlight(j.original, kwArr));
-    setCnt(0);
-    setLoading(false);
+    setCnt(0); setCopied(false); setLoading(false);
   }
 
+  /* ---------- 点击编辑区 ---------- */
   function onClickEditor(e) {
+    /* Ctrl / Cmd 点击 => 正常跳转 */
+    if (e.ctrlKey || e.metaKey) return;
+
     const span = e.target.closest("span[data-kw]");
     if (!span) return;
+    e.preventDefault();               // 阻止默认链接跳转
+
     const kw = span.dataset.kw;
-    setActive(prev => (prev === kw ? null : kw));
+    setActive((prev) => (prev === kw ? null : kw));
 
     if (popRef.current) {
       const rc = span.getBoundingClientRect();
-      popRef.current.style.top = `${rc.bottom + window.scrollY + 6}px`;
+      popRef.current.style.top  = `${rc.bottom + window.scrollY + 6}px`;
       popRef.current.style.left = `${rc.left + rc.width / 2 + window.scrollX}px`;
       popRef.current.style.transform = "translateX(-50%)";
     }
   }
 
+  /* ---------- 选 / 移除 ---------- */
   async function chooseLink(kw, opt) {
+    /* -------- 移除 -------- */
     if (!opt) {
       const green =
         "display:inline-flex;background:#ecfdf5;color:#065f46;" +
         "border:1px solid #bbf7d0;padding:0 2px;border-radius:4px;cursor:pointer";
       const reg = new RegExp(
-        `<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>`,
+        `<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>(\\s*\\(\\(.*?\\)\\))?`,
         "gi"
       );
-      setHtml(p =>
+      setHtml((p) =>
         p.replace(reg, `<span data-kw="${kw}" style="${green}">${kw}</span>`)
       );
-      setCnt(c => Math.max(0, c - 1));
+      setCnt((c) => Math.max(0, c - 1));
       setActive(null);
       return;
     }
 
+    /* -------- 生成 reason -------- */
     let reason = "";
     try {
       const r = await fetch("/api/reason", {
@@ -102,41 +116,46 @@ export default function Home() {
     const repl =
       `<span data-kw="${kw}">` +
       `<a href="${opt.url}" target="_blank" rel="noopener" ` +
-      `style="${blue};text-decoration:underline;font-weight:700">${kw}</a>` +
+      `style="${blue};text-decoration:underline;font-weight:700">` +
+        `${kw}</a><sup style="margin-left:2px">▾</sup>` +
       `</span> ((${reason}))`;
 
     const regSel = new RegExp(
       `<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>(\\s*\\(\\(.*?\\)\\))?`,
       "gi"
     );
-    setHtml(p => {
-      if (!/#dbeafe/.test(p.match(regSel)?.[0] || "")) setCnt(c => c + 1);
+    setHtml((p) => {
+      if (!/#dbeafe/.test(p.match(regSel)?.[0] || "")) setCnt((c) => c + 1);
       return p.replace(regSel, repl);
     });
     setActive(null);
   }
 
+  /* ---------- 复制 ---------- */
   function copyHtml() {
-    const clean = html.replace(
+    const out = html.replace(
       /<span[^>]*data-kw="[^"]+"[^>]*>(.*?)<\/span>/g,
       "$1"
     );
-    navigator.clipboard.writeText(clean);
+    navigator.clipboard.writeText(out);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
 
-  /* ---------- render ---------- */
+  /* ---------- 渲染 ---------- */
   return (
     <div
       className="min-h-screen flex flex-col items-center py-10 px-4"
       style={{ fontFamily: '"Microsoft YaHei", sans-serif' }}
     >
-      <h1 className="text-2xl font-bold mb-6">
-        <span style={{ color: "#f97316" }}>⚡</span> 外链优化
-      </h1>
+      <header className="text-center mb-6">
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <span style={{ color: "#f97316" }}>⚡</span> 外链优化
+        </h1>
+        <p className="text-sm text-gray-500">AI驱动的文章外链优化工具</p>
+      </header>
 
-      <div className="w-full max-w-4xl border rounded-xl p-8 space-y-6">
+      <div className="w-full max-w-5xl border rounded-xl p-8 space-y-6">
         {!data ? (
           <>
             <textarea
@@ -144,7 +163,7 @@ export default function Home() {
               className="w-full border rounded p-3"
               placeholder="Paste English paragraph…"
               value={raw}
-              onChange={e => setRaw(e.target.value)}
+              onChange={(e) => setRaw(e.target.value)}
             />
             <button
               onClick={analyze}
@@ -189,6 +208,7 @@ export default function Home() {
         )}
       </div>
 
+      {/* ---------- Popup ---------- */}
       {active && (
         <div
           ref={popRef}
@@ -205,8 +225,8 @@ export default function Home() {
           }}
         >
           {data.keywords
-            .find(k => (k.keyword || k) === active)
-            ?.options.map(o => (
+            .find((k) => (k.keyword || k) === active)
+            ?.options.map((o) => (
               <button
                 key={o.url}
                 onClick={() => chooseLink(active, o)}
