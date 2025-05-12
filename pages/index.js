@@ -1,19 +1,49 @@
 import { useState, useRef } from "react";
 import { FiCopy } from "react-icons/fi";
 
-/* ------------------------------------------------ util */
-const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");        // 转义正则
-const kwStyle =
-  "display:inline-flex;background:#ecfdf5;color:#065f46;" +
-  "border:1px solid #bbf7d0;padding:0 2px;border-radius:4px;cursor:pointer";
+/* -------------------------------- 共用小工具 -------------------------------- */
+// 将 (( … )) 片段临时替换成占位符，避免被 highlight 再次扫描
+function stashReason(text) {
+  const stash = [];
+  const html = text.replace(/\(\([\s\S]*?\)\)/g, m => {
+    const key = `¤¤${stash.length}¤¤`;
+    stash.push(m);
+    return key;
+  });
+  return { html, stash };
+}
+const unStashReason = (text, stash) =>
+  text.replace(/¤¤(\d+)¤¤/g, (_, i) => stash[+i]);
 
-/* 仅给 “第一次出现” 包 span，其余保持原文 ---------------------- */
+// 转义正则保留字
+const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// 仅首处高亮包 span，其余保持原文
 function highlight(body, kwArr) {
-  const list = [...kwArr].sort((a, b) => b.length - a.length);    // 长词优先
-  let html = body.replace(/(<[^>]+>)/g, "\0$1\0").split("\0");    // 暂时断开 html 标签
+  // 0️⃣ 暂存 reason
+  const { html: raw, stash } = stashReason(body);
+
+  // 过滤重复（大小写统一）+ 按长度从长到短
+  const done = new Set();
+  const list = [...kwArr]
+    .filter(k => {
+      const low = k.toLowerCase();
+      if (done.has(low)) return false;
+      done.add(low);
+      return true;
+    })
+    .sort((a, b) => b.length - a.length);
+
+  // 打断 HTML 标签
+  let html = raw.replace(/(<[^>]+>)/g, "\0$1\0").split("\0");
+
+  const kwStyle =
+    "display:inline-flex;background:#ecfdf5;color:#065f46;" +
+    "border:1px solid #bbf7d0;padding:0 2px;border-radius:4px;cursor:pointer";
+
   list.forEach(k => {
     let first = false;
-    const re = new RegExp(esc(k).replace(/\s+/g, "\\s+"), "gi");
+    const re = new RegExp(`\\b${esc(k)}\\b`, "i");
     html = html.map(chunk =>
       chunk.startsWith("<") || chunk.includes(`data-kw="${k}"`)
         ? chunk
@@ -24,15 +54,17 @@ function highlight(body, kwArr) {
           })
     );
   });
-  return html.join("");
+
+  // 还原 reason
+  return unStashReason(html.join(""), stash);
 }
 
-/* ------------------------------------------------ component */
+/* --------------------------------- 组件 --------------------------------- */
 export default function Home() {
   const [raw, setRaw] = useState("");
-  const [data, setData] = useState(null);                  // {original, kwArr, keywords}
+  const [data, setData] = useState(null);         // { original, keywords, kwArr }
   const [html, setHtml] = useState("");
-  const [active, setActive] = useState(null);              // 当前弹窗 keyword
+  const [active, setActive] = useState(null);     // 当前弹窗关键词
   const [loading, setLoading] = useState(false);
   const [pickedCnt, setCnt] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -47,7 +79,10 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: raw })
     });
-    if (!r.ok) return alert("AI 请求失败");
+    if (!r.ok) {
+      setLoading(false);
+      return alert("AI 请求失败");
+    }
     const j = await r.json();
     const kwArr = j.keywords
       .map(k => (typeof k === "string" ? k : k.keyword || k.phrase || ""))
@@ -58,9 +93,8 @@ export default function Home() {
     setLoading(false);
   }
 
-  /* ---------------- 点击编辑区 ---------------- */
+  /* ---------------- 编辑区点击 ---------------- */
   function onClickEditor(e) {
-    if (e.ctrlKey || e.metaKey) return;                     // 允许 ctrl+click
     const span = e.target.closest("span[data-kw]");
     if (!span) return;
     e.preventDefault();
@@ -75,30 +109,25 @@ export default function Home() {
     }
   }
 
-  /* ---------------- 选择/移除链接 ---------------- */
+  /* ---------------- 选/改/移 外链 ---------------- */
   async function chooseLink(kw, opt) {
-    /* === 移除 === */
+    // === 取消外链 ===
     if (!opt) {
-      const reg = new RegExp(
+      const regA = new RegExp(
         `<a[^>]*>${esc(kw)}<\\/a>(\\s*\\(\\(.*?\\)\\))?`,
         "gi"
       );
       const regSpan = new RegExp(
-        `<span[^>]*data-kw="${esc(kw)}"[^>]*>(.*?)<\\/span>`,
+        `<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>`,
         "gi"
       );
-      setHtml(p =>
-        highlight(
-          p.replace(reg, kw).replace(regSpan, kw),          // 还原成裸文本
-          [kw]
-        )
-      );
+      setHtml(p => highlight(p.replace(regA, kw).replace(regSpan, kw), [kw]));
       setCnt(c => Math.max(0, c - 1));
       setActive(null);
       return;
     }
 
-    /* === reason === */
+    // === 获取 reason ===
     let reason = "";
     try {
       const r = await fetch("/api/reason", {
@@ -110,29 +139,29 @@ export default function Home() {
     } catch {}
     if (!reason) reason = "authoritative source";
 
-    /* link style */
+    // link 样式
     const blue =
       "background:#dbeafe;color:#1e3a8a;" +
       "border:1px solid #bfdbfe;padding:0 2px;border-radius:4px;" +
       "text-decoration:underline;font-weight:700";
-
-    const linkHTML =
-      `<a href="${opt.url}" target="_blank" rel="noopener" style="${blue}">${kw}</a>` +
-      `<sup style="margin-left:2px">▾</sup>`;
+    const pureLink = `<a href="${opt.url}" target="_blank" rel="noopener" style="${blue}">${kw}</a>`;
+    const firstHTML = `${pureLink}<sup style="margin-left:2px">▾</sup> ((${reason}))`;
 
     setHtml(prev => {
-      /* 把首次 span → link+reason */
-      let out = prev.replace(
-        new RegExp(
-          `<span[^>]*data-kw="${esc(kw)}"[^>]*>(.*?)</span>`,
-          "i"
-        ),
-        `${linkHTML} ((${reason}))`
+      const firstSpan = new RegExp(
+        `<span[^>]*data-kw="${esc(kw)}"[^>]*>.*?<\\/span>`,
+        "i"
       );
-      /* 其余裸文本全部同步替换成 link（不附 reason） */
+      // 1️⃣ 首处：span → 带 caret+reason
+      let out = prev.replace(firstSpan, firstHTML);
+      // 2️⃣ 其余裸文本 / 旧 link → 统一成纯链接
       const bare = new RegExp(`\\b${esc(kw)}\\b`, "gi");
-      out = out.replace(bare, linkHTML);
-      setCnt(c => (c ? c : 1));            // 首次统计
+      const anyLink = new RegExp(
+        `<a[^>]*>${esc(kw)}<\\/a>(\\s*\\(\\(.*?\\)\\))?`,
+        "gi"
+      );
+      out = out.replace(bare, pureLink).replace(anyLink, pureLink);
+      setCnt(c => (c ? c : 1));
       return out;
     });
     setActive(null);
@@ -140,7 +169,7 @@ export default function Home() {
 
   /* ---------------- 复制 ---------------- */
   function copyHtml() {
-    const clean = html.replace(/<span[^>]*>|\<\/span>/g, "");      // 移除 kw span
+    const clean = html.replace(/<span[^>]*>|<\/span>/g, "");
     navigator.clipboard.writeText(clean);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -154,7 +183,7 @@ export default function Home() {
         padding: 32
       }}
     >
-      {/* 顶部 */}
+      {/* header */}
       <header style={{ maxWidth: 1040, margin: "0 auto 24px" }}>
         <h1
           style={{
@@ -172,7 +201,7 @@ export default function Home() {
         </p>
       </header>
 
-      {/* 卡片 */}
+      {/* card */}
       <div
         style={{
           maxWidth: 1040,
@@ -183,8 +212,8 @@ export default function Home() {
           padding: 32
         }}
       >
-        {/* 输入阶段 */}
         {!data ? (
+          /* ------ 输入阶段 ------ */
           <>
             <textarea
               rows={8}
@@ -205,7 +234,8 @@ export default function Home() {
               style={{
                 marginTop: 16,
                 padding: "10px 24px",
-                background: loading ? "#9ca3af" : "#000",
+                background: "#000",
+                opacity: loading ? 0.5 : 1,
                 color: "#fff",
                 fontWeight: 700,
                 borderRadius: 6,
@@ -216,7 +246,7 @@ export default function Home() {
             </button>
           </>
         ) : (
-          /* 编辑阶段 */
+          /* ------ 编辑阶段 ------ */
           <>
             <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
               绿色块可添加外链；选后变蓝，可再次点击修改或移除。
@@ -255,7 +285,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* 弹窗 */}
+      {/* 弹出候选卡 */}
       {active && (
         <div
           ref={popRef}
