@@ -1,10 +1,9 @@
 import { useState, useRef } from "react";
 import { FiCopy } from "react-icons/fi";
 
-/* ---------- 工具函数 ---------- */
+/* ---------- util ---------- */
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/* 生成绿色关键词块（只包关键词本身） */
 function highlight(original, kwArr) {
   const sorted = [...kwArr].sort((a, b) => b.length - a.length);
   let html = original.replace(/(<[^>]+>)/g, "\u0000$1\u0000").split("\u0000");
@@ -28,7 +27,6 @@ function highlight(original, kwArr) {
 }
 
 export default function Home() {
-  /* ---------- state ---------- */
   const [raw, setRaw] = useState("");
   const [data, setData] = useState(null);
   const [html, setHtml] = useState("");
@@ -39,7 +37,7 @@ export default function Home() {
 
   const popRef = useRef(null);
 
-  /* ---------- 调 /api/ai ---------- */
+  /* ---------- /api/ai ---------- */
   async function analyze() {
     if (!raw.trim()) return alert("请先粘贴英文段落！");
     setLoading(true);
@@ -67,7 +65,7 @@ export default function Home() {
     setLoading(false);
   }
 
-  /* ---------- 点击关键词 ---------- */
+  /* ---------- editor click ---------- */
   function onClickEditor(e) {
     const span = e.target.closest("span[data-kw]");
     if (!span) return;
@@ -84,9 +82,8 @@ export default function Home() {
     }
   }
 
-  /* ---------- 选/移除外链 ---------- */
+  /* ---------- choose / remove ---------- */
   async function chooseLink(kw, opt) {
-    /* ---- 移除 ---- */
     if (!opt) {
       const green =
         "display:inline-flex;background:#ecfdf5;color:#065f46;" +
@@ -103,7 +100,6 @@ export default function Home() {
       return;
     }
 
-    /* ---- reason ---- */
     let reason = "";
     try {
       const r = await fetch("/api/reason", {
@@ -137,7 +133,7 @@ export default function Home() {
     setActive(null);
   }
 
-  /* ---------- 复制 ---------- */
+  /* ---------- copy ---------- */
   function copyHtml() {
     const out = html.replace(
       /<span[^>]*data-kw="[^"]+"[^>]*>(.*?)<\/span>/g,
@@ -163,7 +159,6 @@ export default function Home() {
 
       <div className="w-full max-w-5xl border rounded-xl p-8 space-y-6">
         {!data ? (
-          /* ---------- 输入阶段 ---------- */
           <>
             <textarea
               rows={8}
@@ -176,19 +171,17 @@ export default function Home() {
             <button
               onClick={analyze}
               disabled={loading}
+              className="px-6 py-2 rounded"                {/* 不再带 Tailwind 蓝色类 */}
               style={{
                 background: loading ? "#94a3b8" : "#000",
                 color: "#fff",
                 fontWeight: 700,
-                padding: "8px 24px",
-                borderRadius: 4,
               }}
             >
               {loading ? "Analyzing…" : "分析关键词"}
             </button>
           </>
         ) : (
-          /* ---------- 编辑阶段 ---------- */
           <>
             <p className="font-semibold mb-1">文本编辑器</p>
             <p className="text-xs text-gray-600 mb-3">
@@ -199,22 +192,17 @@ export default function Home() {
               className="prose max-w-none border rounded p-4"
               dangerouslySetInnerHTML={{ __html: html }}
               onClick={onClickEditor}
-              style={{ fontFamily: '"Microsoft YaHei", sans-serif' }}
             />
 
             <div className="text-right mt-4">
               <button
                 disabled={pickedCnt === 0}
                 onClick={copyHtml}
+                className="inline-flex items-center gap-2 px-6 py-2 rounded"
                 style={{
                   background: pickedCnt === 0 ? "#94a3b8" : "#000",
                   color: "#fff",
                   fontWeight: 700,
-                  padding: "8px 24px",
-                  borderRadius: 4,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
                 }}
               >
                 <FiCopy /> {copied ? "Copied!" : "确认选择"}
@@ -224,7 +212,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* ---------- 弹窗 ---------- */}
+      {/* popup */}
       {active && (
         <div
           ref={popRef}
