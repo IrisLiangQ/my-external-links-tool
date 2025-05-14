@@ -1,88 +1,114 @@
-// pages/api/ai.js  – 2025‑05‑12 unified version
-// --------------------------------------------------
-// POST  { text }  =>  {
-//   topics: [...],
-//   keywords: [ { keyword, options:[{ url, title }] } ],
-//   original: <escaped‑html>
-// }
-// --------------------------------------------------
+// pages/api/ai.js
+// 统一关键词提取 + 外链搜索接口
+// ---------------------------------------------------
+export const config = {
+  runtime: "edge", // 使用 Edge Runtime，减少冷启动
+};
 
-import { Configuration, OpenAIApi } from "openai";
+const OPENAI_API_KEY  = process.env.OPENAI_API_KEY;
+const SERPER_API_KEY  = process.env.SERPER_API_KEY;
 
-const openai = new OpenAIApi(
-  new Configuration({ apiKey: process.env.OPENAI_API_KEY })
-);
-
-const SERPER_KEY = process.env.SERPER_API_KEY;
-const SERPER_ENDPOINT = "https://google.serper.dev/search";
-
-export const config = { runtime: "edge" };
-
-export default async function handler(req) {
-  if (req.method !== "POST")
-    return new Response("Method not allowed", { status: 405 });
-
-  const { text = "" } = await req.json();
-  if (!text.trim())
-    return new Response("{error:'empty'}", { status: 400 });
-
-  /* --------------------------------------------------
-       1️⃣  让 GPT 抽取主题 + 关键词
-     -------------------------------------------------- */
-  const sys = `You are an SEO assistant. Read user article and output JSON ONLY.`;
-  const usr = `Article:\n"""${text.slice(0,3800)}"""
-Return a JSON object with fields:\n- topics: 2‑4 short strings of the main subject\n- keywords: 5‑10 noun phrases (max 3 words) that deserve authoritative outbound links\n  * Do NOT include duplicate or generic stop‑words\n  * Exclude phrases that already contain URLs\nExample:\n{"topics":["Electric vehicles"],"keywords":["AC charging","EV drivers"]}`;
-
-  const gpt = await openai.createChatCompletion({
-    model: "gpt-3.5-turbo",
-    temperature: 0.2,
-    messages: [ { role:"system", content: sys }, { role:"user", content: usr } ]
-  });
-
-  let parsed;
-  try { parsed = JSON.parse(gpt.data.choices[0].message.content); }
-  catch { parsed = { topics:[], keywords:[] }; }
-
-  const kws = [...new Set(parsed.keywords || [])].slice(0,10);
-
-  /* --------------------------------------------------
-       2️⃣  为每个关键词查 3 个外链（Serper）
-     -------------------------------------------------- */
-  async function fetchSerper(q){
-    try {
-      const r = await fetch(SERPER_ENDPOINT, {
-        method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "X-API-KEY": SERPER_KEY
-        },
-        body: JSON.stringify({ q, num: 10, autocorrect: true })
-      });
-      const j = await r.json();
-      return (j.organic || []).slice(0,3).map(o=>({ url:o.link, title:o.title }));
-    } catch(e){ return []; }
-  }
-
-  const keywords = [];
-  for (const kw of kws){
-    let options = await fetchSerper(kw);
-    if(!options.length){
-      // fallback wikipedia
-      options = [{ url:`https://en.wikipedia.org/wiki/${encodeURIComponent(kw.replace(/ /g,"_"))}`, title:`${kw} – Wikipedia` }];
-    }
-    keywords.push({ keyword: kw, options });
-  }
-
-  /* --------------------------------------------------
-       3️⃣  返回
-     -------------------------------------------------- */
-  return new Response(
-    JSON.stringify({ topics: parsed.topics || [], keywords, original: escapeHtml(text) }),
-    { headers:{"Content-Type":"application/json"} }
-  );
+if (!OPENAI_API_KEY || !SERPER_API_KEY) {
+  console.warn("[api/ai] 缺少 OPENAI_API_KEY 或 SERPER_API_KEY 环境变量！");
 }
 
-/* util: very light HTML escape so < & > don’t break editing area */
-function escapeHtml(str){
-  return str.replace(/[&<>]/g, c=> ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+/* -------------------------------------------------- */
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+const SERPER_URL = "https://google.serper.dev/search";
+
+/**
+ * 调用 OpenAI，返回 { topics: string[], keywords: string[] }
+ */
+async function extractKeywords(text) {
+  const prompt = `You are an SEO assistant.\n\nGiven the following English paragraph between <text></text>,\n1. Identify the MAIN TOPIC in 3 ~ 5 words.\n2. Pick up to 6 keyword phrases (1 ~ 3 words each) suitable for inserting external links.\n3. Do NOT repeat the same surface form.\n4. Return ONLY valid JSON like {\n  \"topics\": [ ... ],\n  \"keywords\": [ ... ]\n}`;
+
+  const body = {
+    model: "gpt-3.5-turbo", // 免费模型
+    messages: [
+      { role: "system", content: prompt },
+      { role: "user",   content: `<text>\n${text}\n</text>` }
+    ],
+    temperature: 0.3,
+  };
+
+  const r = await fetch(OPENAI_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!r.ok) throw new Error(`OpenAI error: ${r.status}`);
+  const { choices } = await r.json();
+  const raw = choices?.[0]?.message?.content?.trim();
+  const json = JSON.parse(raw);
+  return json;
+}
+
+/**
+ * 用 Serper 搜索关键词，返回前 3 条 { url,title }
+ */
+async function searchLinks(keyword) {
+  const r = await fetch(SERPER_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-KEY": SERPER_API_KEY,
+    },
+    body: JSON.stringify({ q: keyword, autocorrect: true, gl: "us", num: 5 }),
+  });
+  if (!r.ok) throw new Error("Serper error");
+  const json = await r.json();
+  const results = json?.organic ?? [];
+  return results.slice(0, 3).map((o) => ({ url: o.link, title: o.title }));
+}
+
+/* -------------------------------------------------- */
+export default async function handler(req) {
+  if (req.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405 });
+  }
+
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response("Invalid JSON", { status: 400 });
+  }
+
+  const text = body?.text?.trim?.();
+  if (!text) return new Response("Missing text", { status: 400 });
+
+  try {
+    // 1. 提取关键词
+    const { topics = [], keywords = [] } = await extractKeywords(text);
+
+    // 2. 去重（忽略大小写）
+    const unique = Array.from(new Set(keywords.map((k) => k.toLowerCase())));
+
+    // 3. 查询外链（并发）
+    const kwObjects = await Promise.all(
+      unique.map(async (kw) => {
+        const options = await searchLinks(kw);
+        return { keyword: kw, options };
+      })
+    );
+
+    /* 返回结构：{ topics, keywords:[{keyword,options}], original } */
+    const payload = {
+      topics,
+      keywords: kwObjects,
+      original: text,
+    };
+
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("/api/ai", err);
+    return new Response("Internal Server Error", { status: 500 });
+  }
 }
