@@ -2,19 +2,27 @@
   "name": "my-external-links-tool",
   "version": "1.0.0",
   "private": true,
+
   "scripts": {
-    "dev": "next dev",
+    "dev":   "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "lint":  "next lint"
   },
+
   "dependencies": {
     "next": "14.2.3",
     "react": "18.2.0",
-    "react-dom": "18.2.0"
+    "react-dom": "18.2.0",
+
+    "react-icons": "^4.12.0",   // 关键词复制按钮里的图标
+    "openai": "^4.28.0",        // 仍有两条 API（reason / search）在用 OpenAI SDK
+    "cross-fetch": "^4.0.0"     // 让 OpenAI SDK 在 Edge Runtime 里能用 fetch
   },
+
   "devDependencies": {
-    "autoprefixer": "^10.4.16",
-    "postcss": "^8.4.31",
-    "tailwindcss": "^3.4.4"
+    "tailwindcss": "^3.4.4",
+    "postcss": "^8.4.32",
+    "autoprefixer": "^10.4.16"
   }
 }
