@@ -1,17 +1,21 @@
-/** @type {import('tailwindcss').Config} */
+// tailwind.config.js
 module.exports = {
   content: [
     './pages/**/*.{js,jsx}',
     './components/**/*.{js,jsx}',
+    // 若后续有 server 组件或 app 目录，也别忘了加进来
     './pages/_app.{js,jsx}',
   ],
   safelist: [
     // 绿色高亮 & 蓝色链接
     { pattern: /(bg|text)-(green|blue)-(50|100|200|600|700|800)/ },
-    // 圆角 / 阴影 / prose 等
+    // --------- 新增 ↓ 保底 ---------
+    'truncate',         // 单行省略
+    'underline',        // picked 状态
+    'text-blue-800',    // picked 状态
+    // --------- 旧有 ---------
     'rounded', 'rounded-md', 'rounded-lg', 'rounded-xl',
     'shadow', 'shadow-lg', 'prose', 'cursor-pointer',
-    // popup 动画自定义 keyframe
     'animate-fadeIn',
   ],
   theme: {
@@ -20,9 +24,9 @@ module.exports = {
         sans: ['"Microsoft YaHei"', 'Helvetica', 'Arial', 'sans-serif'],
       },
       colors: {
-        brand: '#ffae38',   // logo 小闪电色
-        kwBg:  '#d1fae5',   // 关键词高亮背景
-        kwFg:  '#047857',   // 关键词高亮文字
+        brand: '#ffae38',
+        kwBg:  '#d1fae5',
+        kwFg:  '#047857',
         cardBg:'#ffffff',
       },
       maxWidth: {
@@ -36,5 +40,8 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // 如果你仍想用 line-clamp，可以再装：
+    // require('@tailwindcss/line-clamp'),
+  ],
 };
