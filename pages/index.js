@@ -184,10 +184,11 @@ export default function Home() {
               <button
                 key={i}
                 onClick={() => chooseLink(activeKw, o)}
-                className="flex flex-col w-full items-start text-left gap-1 p-4 hover:bg-gray-50 border-b last:border-0"
+                className="flex flex-col w-full items-start text-left gap-0.5 px-4 py-3 hover:bg-gray-50 border-b last:border-0"
               >
-                <p className="font-medium line-clamp-1">{o.title || o.url}</p>
-                <p className="text-xs text-gray-600 line-clamp-1">{o.url}</p>
+                {/* 单行省略统一高度 ↓↓↓ */}
+                <p className="text-sm font-medium truncate">{o.title || o.url}</p>
+                <p className="text-xs text-gray-600 truncate">{o.url}</p>
               </button>
             ))}
           {linkedMap.current.has(activeKw) && (
