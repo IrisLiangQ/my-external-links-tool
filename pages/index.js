@@ -106,16 +106,21 @@ export default function Home() {
     setActiveKw(null);
   }
 
-  /* ---------- 复制 HTML ---------- */
-  function copyHtml() {
-    let final = html
-      .replace(/<span class="kw"[^>]*>(.*?)<\/span>/g, '$1')
-      .replace(/<span class="picked"[^>]*>(.*?)<\/span>/g, '$1');
+ /* ---------- 复制 HTML ---------- */
+function copyHtml() {
+  let final = html
+    // 1) 拆掉任何 <span …> … </span>
+    .replace(/<span[^>]*>(.*?)<\\/span>/g, '$1')
+    // 2) 去掉所有 caret ▾ 标记
+    .replace(/<sup[^>]*>.*?<\\/sup>/g, '')
+    // 3) 压掉多余空格
+    .replace(/\\s+\\)/g, ')');
 
-    navigator.clipboard.writeText(final);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
+  navigator.clipboard.writeText(final);
+  setCopied(true);
+  setTimeout(() => setCopied(false), 2000);
+}
+
 
   /* -------------------- UI -------------------- */
   return (
