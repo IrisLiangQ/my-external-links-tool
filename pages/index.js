@@ -12,10 +12,10 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  /* 记录 “已插入外链” 的首处 <span>，确保唯一 */
-  const linkedMap      = useRef(new Map());          // kw -> spanElement
+  /* refs */
+  const linkedMap      = useRef(new Map());
   const popupRef       = useRef(null);
-  const keywordCounter = useRef({});                 // kw -> serial (给 data-pos)
+  const keywordCounter = useRef({});
 
   /* ---------- 调用 /api/ai ---------- */
   async function analyze() {
@@ -69,7 +69,7 @@ export default function Home() {
     }
   }
 
-  /* ---------- 选链接（符合 Footnotes Made Easy） ---------- */
+  /* ---------- 选链接 ---------- */
   async function chooseLink(kw, opt) {
     const span = linkedMap.current.get(kw) ||
       document.querySelector(`span[data-kw="${CSS.escape(kw)}"][data-pos="0"]`);
@@ -89,8 +89,7 @@ export default function Home() {
     if (!reason) reason = 'relevant reference';
 
     span.className = 'picked underline text-blue-800';
-    span.innerHTML =
-      `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a> ((${reason}))`;
+    span.innerHTML = `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a> ((${reason}))`;
 
     linkedMap.current.set(kw, span);
     setActiveKw(null);
@@ -106,21 +105,17 @@ export default function Home() {
     setActiveKw(null);
   }
 
- /* ---------- 复制 HTML ---------- */
-function copyHtml() {
-  let final = html
-    // 1) 拆掉任何 <span …> … </span>
-    .replace(/<span[^>]*>(.*?)<\\/span>/g, '$1')
-    // 2) 去掉所有 caret ▾ 标记
-    .replace(/<sup[^>]*>.*?<\\/sup>/g, '')
-    // 3) 压掉多余空格
-    .replace(/\\s+\\)/g, ')');
+  /* ---------- 复制 HTML ---------- */
+  function copyHtml() {
+    let final = html
+      .replace(/<span[^>]*>([\s\S]*?)<\\/span>/g, '$1')
+      .replace(/<sup[^>]*>[\s\S]*?<\\/sup>/g, '')
+      .replace(/\s+\)/g, ')');
 
-  navigator.clipboard.writeText(final);
-  setCopied(true);
-  setTimeout(() => setCopied(false), 2000);
-}
-
+    navigator.clipboard.writeText(final);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   /* -------------------- UI -------------------- */
   return (
@@ -153,9 +148,7 @@ function copyHtml() {
         ) : (
           <>
             <h2 className="font-semibold text-lg">文本编辑器</h2>
-            <p className="text-xs text-gray-500 mb-2">
-              绿色块可添加外链；选后变蓝，可再次点击修改或移除。
-            </p>
+            <p className="text-xs text-gray-500 mb-2">绿色块可添加外链；选后变蓝，可再次点击修改或移除。</p>
 
             <div
               className="prose max-w-none border rounded-md p-4 leading-7"
@@ -168,37 +161,29 @@ function copyHtml() {
                 onClick={copyHtml}
                 className="inline-flex items-center gap-2 px-6 py-2 rounded bg-black text-white hover:bg-gray-800"
               >
-                <FiCopy />
-                {copied ? 'Copied!' : '复制 HTML'}
+                <FiCopy /> {copied ? 'Copied!' : '复制 HTML'}
               </button>
             </div>
           </>
         )}
       </div>
 
-      {/* 弹窗：链接选项 / 移除 */}
       {activeKw && (
-        <div
-          ref={popupRef}
-          className="fixed z-50 w-96 bg-white shadow-lg rounded-xl border animate-fadeIn"
-        >
-          {data.keywords
-            .find((k) => k.keyword === activeKw)
-            ?.options.map((o, i) => (
-              <button
-                key={i}
-                onClick={() => chooseLink(activeKw, o)}
-                className="flex flex-col w-full items-start text-left gap-0.5 px-4 py-3 min-h-[64px] hover:bg-gray-50 border-b last:border-0"
-              >
-                <p className="text-sm font-medium truncate w-full">{o.title || o.url}</p>
-                <p className="text-xs text-gray-600 truncate w-full">{o.url}</p>
-              </button>
-            ))}
+        <div ref={popupRef} className="fixed z-50 w-96 bg-white shadow-lg rounded-xl border animate-fadeIn">
+          {data.keywords.find(k => k.keyword === activeKw)?.options.map((o, i) => (
+            <button
+              key={i}
+              onClick={() => chooseLink(activeKw, o)}
+              className="flex flex-col w-full items-start text-left gap-0.5 px-4 py-3 min-h-[64px] hover:bg-gray-50 border-b last:border-0"
+            >
+              <p className="text-sm font-medium truncate w-full">{o.title || o.url}</p>
+              <p className="text-xs text-gray-600 truncate w-full">{o.url}</p>
+            </button>
+          ))}
           {linkedMap.current.has(activeKw) && (
             <button
               onClick={() => removeLink(activeKw)}
-              className="w-full text-red-600 py-3 text-center hover:bg-red-50 rounded-b-xl"
-            >
+              className="w-full text-red-600 py-3 text-center hover:bg-red-50 rounded-b-xl">
               ✕ 移除外链
             </button>
           )}
