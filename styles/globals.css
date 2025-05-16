@@ -4,3 +4,10 @@
 
 /* 简单全局样式，可按需调整 */
 body { @apply bg-gray-50 text-gray-900 antialiased; }
+
+/* === 追加：保证 .truncate 单行省略、不换行 === */
+.truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
