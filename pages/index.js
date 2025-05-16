@@ -1,5 +1,4 @@
-// 这里是新的 index.js，全部复制进去即可
-// （代码与前一版几乎一致，只做了“单行省略 & 高度统一”补丁）
+// pages/index.js
 import { useState, useRef } from 'react';
 import { FiCopy, FiLink } from 'react-icons/fi';
 
@@ -37,14 +36,13 @@ export default function Home() {
     setData(j);
     linkedMap.current.clear();
 
-    // --- 高亮关键词 ---
+    /* --- 高亮关键词 --- */
     let body = j.original;
     j.keywords.forEach(({ keyword }) => {
-      const kw   = keyword.trim();
-      const pos  = keywordCounter.current[kw] ?? 0;
+      const kw  = keyword.trim();
+      const pos = keywordCounter.current[kw] ?? 0;
       keywordCounter.current[kw] = pos + 1;
 
-      // 只替换一次，避免全局乱替
       body = body.replace(
         new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i'),
         `<span data-kw="${kw}" data-pos="${pos}" class="kw bg-kwBg text-kwFg px-1 rounded cursor-pointer hover:bg-kwFg/10">${kw}<sup class="caret ml-0.5">▾</sup></span>`
@@ -57,14 +55,12 @@ export default function Home() {
   function onClickEditor(e) {
     const span = e.target.closest('span.kw, span.picked');
     if (!span) return;
-    const kw  = span.dataset.kw;
+    const kw = span.dataset.kw;
 
-    // 如果这个关键词已经插过外链且当前 span 不是首个，则不再弹窗
     if (linkedMap.current.has(kw) && span !== linkedMap.current.get(kw)) return;
 
     setActiveKw(activeKw === kw ? null : kw);
 
-    // 让弹窗跟随光标位置
     if (popupRef.current) {
       const rc = span.getBoundingClientRect();
       popupRef.current.style.top  = `${rc.bottom + window.scrollY + 6}px`;
@@ -75,24 +71,30 @@ export default function Home() {
 
   /* ---------- 选链接 ---------- */
   async function chooseLink(kw, opt) {
-    // 调用 /api/reason 生成推荐理由
+    // 当前关键词首个 span
+    const span = linkedMap.current.get(kw) ||
+      document.querySelector(`span[data-kw="${CSS.escape(kw)}"][data-pos="0"]`);
+    if (!span) return;
+
+    /* === 新增：提取整句文本，发送给 /api/reason === */
+    const sentence = span.closest('p')?.innerText || '';
+
     let reason = '';
     try {
       const r = await fetch('/api/reason', {
         method : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ url: opt.url, phrase: kw }),
+        body   : JSON.stringify({ url: opt.url, phrase: kw, sentence }),
       });
       if (r.ok) reason = (await r.json()).reason;
     } catch {}
-    if (!reason) reason = 'authoritative reference';
+    if (!reason) reason = 'relevant reference';
 
-    // 把第一处 span 替换成带链接的蓝色文字
-    const span = linkedMap.current.get(kw) || document.querySelector(`span[data-kw="${CSS.escape(kw)}"][data-pos="0"]`);
-    if (!span) return;
-
+    /* --- 替换首个 span 为带链接蓝色文字 --- */
     span.className = 'picked underline text-blue-800 cursor-pointer';
-    span.innerHTML = `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a><sup class="caret ml-0.5">▾</sup> ((${reason}))`;
+    span.innerHTML =
+      `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a>` +
+      `<sup class="caret ml-0.5">▾</sup> ((${reason}))`;
 
     linkedMap.current.set(kw, span);
     setActiveKw(null);
@@ -111,8 +113,8 @@ export default function Home() {
   /* ---------- 复制 HTML ---------- */
   function copyHtml() {
     let final = html
-      .replace(/<span class="kw"[^>]*>(.*?)<\/span>/g, '$1')       // 去掉绿色 span
-      .replace(/<span class="picked"[^>]*>(.*?)<\/span>/g, '$1');  // 去掉蓝色 wrapper
+      .replace(/<span class="kw"[^>]*>(.*?)<\/span>/g, '$1')
+      .replace(/<span class="picked"[^>]*>(.*?)<\/span>/g, '$1');
 
     navigator.clipboard.writeText(final);
     setCopied(true);
@@ -185,7 +187,6 @@ export default function Home() {
               <button
                 key={i}
                 onClick={() => chooseLink(activeKw, o)}
-                /* ------------ 统一高度 + 单行省略 ------------ */
                 className="flex flex-col w-full items-start text-left gap-0.5 px-4 py-3 min-h-[64px] hover:bg-gray-50 border-b last:border-0"
               >
                 <p className="text-sm font-medium truncate w-full">{o.title || o.url}</p>
