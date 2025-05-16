@@ -69,14 +69,12 @@ export default function Home() {
     }
   }
 
-  /* ---------- 选链接 ---------- */
+  /* ---------- 选链接（符合 Footnotes Made Easy） ---------- */
   async function chooseLink(kw, opt) {
-    // 当前关键词首个 span
     const span = linkedMap.current.get(kw) ||
       document.querySelector(`span[data-kw="${CSS.escape(kw)}"][data-pos="0"]`);
     if (!span) return;
 
-    /* === 新增：提取整句文本，发送给 /api/reason === */
     const sentence = span.closest('p')?.innerText || '';
 
     let reason = '';
@@ -90,11 +88,9 @@ export default function Home() {
     } catch {}
     if (!reason) reason = 'relevant reference';
 
-    /* --- 替换首个 span 为带链接蓝色文字 --- */
-    span.className = 'picked underline text-blue-800 cursor-pointer';
+    span.className = 'picked underline text-blue-800';
     span.innerHTML =
-      `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a>` +
-      `<sup class="caret ml-0.5">▾</sup> ((${reason}))`;
+      `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a> ((${reason}))`;
 
     linkedMap.current.set(kw, span);
     setActiveKw(null);
