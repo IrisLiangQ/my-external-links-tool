@@ -1,4 +1,5 @@
-// pages/index.js
+// 这里是新的 index.js，全部复制进去即可
+// （代码与前一版几乎一致，只做了“单行省略 & 高度统一”补丁）
 import { useState, useRef } from 'react';
 import { FiCopy, FiLink } from 'react-icons/fi';
 
@@ -57,13 +58,13 @@ export default function Home() {
     const span = e.target.closest('span.kw, span.picked');
     if (!span) return;
     const kw  = span.dataset.kw;
-    const pos = span.dataset.pos;          // 字符串
 
-    // 非首处并且已经插过链接 -> 直接返回
+    // 如果这个关键词已经插过外链且当前 span 不是首个，则不再弹窗
     if (linkedMap.current.has(kw) && span !== linkedMap.current.get(kw)) return;
 
     setActiveKw(activeKw === kw ? null : kw);
 
+    // 让弹窗跟随光标位置
     if (popupRef.current) {
       const rc = span.getBoundingClientRect();
       popupRef.current.style.top  = `${rc.bottom + window.scrollY + 6}px`;
@@ -74,7 +75,7 @@ export default function Home() {
 
   /* ---------- 选链接 ---------- */
   async function chooseLink(kw, opt) {
-    // 获取推荐理由
+    // 调用 /api/reason 生成推荐理由
     let reason = '';
     try {
       const r = await fetch('/api/reason', {
@@ -86,7 +87,7 @@ export default function Home() {
     } catch {}
     if (!reason) reason = 'authoritative reference';
 
-    // 当前 span 即第一处
+    // 把第一处 span 替换成带链接的蓝色文字
     const span = linkedMap.current.get(kw) || document.querySelector(`span[data-kw="${CSS.escape(kw)}"][data-pos="0"]`);
     if (!span) return;
 
@@ -184,11 +185,11 @@ export default function Home() {
               <button
                 key={i}
                 onClick={() => chooseLink(activeKw, o)}
-                className="flex flex-col w-full items-start text-left gap-0.5 px-4 py-3 hover:bg-gray-50 border-b last:border-0"
+                /* ------------ 统一高度 + 单行省略 ------------ */
+                className="flex flex-col w-full items-start text-left gap-0.5 px-4 py-3 min-h-[64px] hover:bg-gray-50 border-b last:border-0"
               >
-                {/* 单行省略统一高度 ↓↓↓ */}
-                <p className="text-sm font-medium truncate">{o.title || o.url}</p>
-                <p className="text-xs text-gray-600 truncate">{o.url}</p>
+                <p className="text-sm font-medium truncate w-full">{o.title || o.url}</p>
+                <p className="text-xs text-gray-600 truncate w-full">{o.url}</p>
               </button>
             ))}
           {linkedMap.current.has(activeKw) && (
