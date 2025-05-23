@@ -5,26 +5,23 @@ import { FiCopy, FiLink } from 'react-icons/fi';
 /* --------------- 主组件 ---------------- */
 export default function Home() {
   /* ---------- 状态 ---------- */
-  const [raw, setRaw] = useState('');
-  const [data, setData] = useState(null);            // { keywords:[{keyword, options}], original }
-  const [html, setHtml] = useState('');
-  const [activeKw, setActiveKw] = useState(null);    // 当前打开弹窗的关键词
-  const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [extraInput, setExtraInput] = useState('');  // 文章级额外语境词
-  const [showModal, setShowModal] = useState(false); // 控制“改进推荐”对话框
+  const [raw,        setRaw]        = useState('');
+  const [data,       setData]       = useState(null);   // { original, keywords:[{keyword, options}] }
+  const [html,       setHtml]       = useState('');
+  const [activeKw,   setActiveKw]   = useState(null);   // 当前弹窗关键词
+  const [loading,    setLoading]    = useState(false);
+  const [copied,     setCopied]     = useState(false);
+  const [extraInput, setExtraInput] = useState('');
 
   /* refs */
-  const linkedMap      = useRef(new Map());
+  const linkedMap      = useRef(new Map());             // kw → 首个已插入外链 span
   const popupRef       = useRef(null);
-  const keywordCounter = useRef({});
+  const keywordCounter = useRef({});                    // kw → 当前已高亮次数
 
   /* ---------- 调用 /api/ai ---------- */
   async function analyze() {
-    if (!raw.trim()) {
-      alert('请先粘贴英文段落！');
-      return;
-    }
+    if (!raw.trim()) { alert('请先粘贴英文段落！'); return; }
+
     setLoading(true);
     setData(null);
     keywordCounter.current = {};
@@ -32,22 +29,16 @@ export default function Home() {
     const r = await fetch('/api/ai', {
       method : 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body   : JSON.stringify({
-        text : raw,
-        extra: extraInput.split(/[,\\s]+/).filter(Boolean)
-      }),
+      body   : JSON.stringify({ text: raw }),
     });
     setLoading(false);
-    if (!r.ok) {
-      alert('服务器分析失败');
-      return;
-    }
+    if (!r.ok) { alert('服务器分析失败'); return; }
 
     const j = await r.json();
     setData(j);
     linkedMap.current.clear();
 
-    /* --- 高亮关键词（先长后短） --- */
+    /* --- 高亮关键词（先长后短防止子串嵌套） --- */
     let body = j.original;
     j.keywords
       .sort((a, b) => b.keyword.length - a.keyword.length)
@@ -57,7 +48,7 @@ export default function Home() {
         keywordCounter.current[kw] = pos + 1;
 
         body = body.replace(
-          new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i'),
+          new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i'),
           `<span data-kw="${kw}" data-pos="${pos}" class="kw bg-kwBg text-kwFg px-1 rounded cursor-pointer hover:bg-kwFg/10">${kw}<sup class="caret ml-0.5">▾</sup></span>`
         );
       });
@@ -68,16 +59,17 @@ export default function Home() {
   function onClickEditor(e) {
     const span = e.target.closest('span.kw, span.picked');
     if (!span) return;
-    const kw = span.dataset.kw;
 
+    const kw = span.dataset.kw;
     if (linkedMap.current.has(kw) && span !== linkedMap.current.get(kw)) return;
 
     setActiveKw(activeKw === kw ? null : kw);
 
+    // 让弹窗跟随选中词
     if (popupRef.current) {
       const rc = span.getBoundingClientRect();
-      popupRef.current.style.top  = `${rc.bottom + window.scrollY + 6}px`;
-      popupRef.current.style.left = `${rc.left + rc.width / 2 + window.scrollX}px`;
+      popupRef.current.style.top       = `${rc.bottom + window.scrollY + 6}px`;
+      popupRef.current.style.left      = `${rc.left + rc.width / 2 + window.scrollX}px`;
       popupRef.current.style.transform = 'translateX(-50%)';
     }
   }
@@ -90,16 +82,18 @@ export default function Home() {
     if (!span) return;
 
     const sentence = span.closest('p')?.innerText || '';
+    const extra    = extraInput.split(/[,\s]+/).filter(Boolean);
 
     let reason = '';
     try {
       const r = await fetch('/api/reason', {
         method : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ url: opt.url, phrase: kw, sentence }),
+        body   : JSON.stringify({ url: opt.url, phrase: kw, sentence, extra }),
       });
       if (r.ok) reason = (await r.json()).reason;
-    } catch {}
+    } catch {/* 忽略 */ }
+
     if (!reason) reason = 'relevant reference';
 
     span.className = 'picked underline text-blue-800';
@@ -108,6 +102,7 @@ export default function Home() {
 
     linkedMap.current.set(kw, span);
     setActiveKw(null);
+    setExtraInput('');
   }
 
   /* ---------- 移除外链 ---------- */
@@ -163,7 +158,9 @@ export default function Home() {
         ) : (
           <>
             <h2 className="font-semibold text-lg">文本编辑器</h2>
-            <p className="text-xs text-gray-500 mb-2">绿色块可添加外链；选后变蓝，可再次点击修改或移除。</p>
+            <p className="text-xs text-gray-500 mb-2">
+              绿色块可添加外链；选后变蓝，可再次点击修改或移除。
+            </p>
 
             <div
               className="prose max-w-none border rounded-md p-4 leading-7"
@@ -183,21 +180,37 @@ export default function Home() {
         )}
       </div>
 
-      {/* 关键词弹窗 */}
-      {activeKw && (
-        <div ref={popupRef} className="fixed z-50 w-96 bg-white shadow-lg rounded-xl border animate-fadeIn">
+      {/* -------- 弹窗：链接选项 / 移除 -------- */}
+      {activeKw && data && (
+        <div
+          ref={popupRef}
+          className="fixed z-50 w-96 bg-white shadow-lg rounded-xl border animate-fadeIn"
+        >
+          {/* 额外语境输入框 */}
+          <input
+            type="text"
+            placeholder="Extra context (e.g. EV, charger)"
+            value={extraInput}
+            onChange={(e) => setExtraInput(e.target.value)}
+            className="w-full border-b px-4 py-2 text-sm focus:outline-none"
+          />
+
+          {/* 保护：data?.keywords 必须存在 */}
           {data.keywords
-            .find(k => k.keyword === activeKw)
+            .find((k) => k.keyword === activeKw)
             ?.options.map((o, i) => (
               <button
                 key={i}
                 onClick={() => chooseLink(activeKw, o)}
                 className="flex flex-col w-full items-start text-left gap-0.5 px-4 py-3 min-h-[64px] hover:bg-gray-50 border-b last:border-0"
               >
-                <p className="text-sm font-medium truncate w-full">{o.title || o.url}</p>
+                <p className="text-sm font-medium truncate w-full">
+                  {o.title || o.url}
+                </p>
                 <p className="text-xs text-gray-600 truncate w-full">{o.url}</p>
               </button>
             ))}
+
           {linkedMap.current.has(activeKw) && (
             <button
               onClick={() => removeLink(activeKw)}
@@ -206,48 +219,6 @@ export default function Home() {
               ✕ 移除外链
             </button>
           )}
-        </div>
-      )}
-
-      {/* 改进推荐浮动按钮 */}
-      <button
-        className="fixed bottom-8 right-8 bg-blue-600 text-white px-4 py-2 rounded-full shadow"
-        onClick={() => setShowModal(true)}
-      >
-        🔄 改进推荐
-      </button>
-
-      {/* 模态框：一次性输入额外语境词 */}
-      {showModal && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50">
-          <div className="bg-white rounded-xl p-6 w-80 space-y-4">
-            <h3 className="font-medium">添加上下文关键词</h3>
-
-            <input
-              value={extraInput}
-              onChange={e => setExtraInput(e.target.value)}
-              placeholder="e.g. EV charger, SAE J1772"
-              className="w-full border px-3 py-2 text-sm rounded"
-            />
-
-            <div className="text-right space-x-3">
-              <button
-                onClick={() => setShowModal(false)}
-                className="text-gray-500"
-              >
-                取消
-              </button>
-              <button
-                className="bg-black text-white px-4 py-1 rounded"
-                onClick={() => {
-                  analyze();
-                  setShowModal(false);
-                }}
-              >
-                重新分析
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>
