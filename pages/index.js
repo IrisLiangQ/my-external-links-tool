@@ -39,7 +39,6 @@ export default function Home() {
 
     /* --- 高亮关键词 --- */
 let body = j.original;
-- j.keywords.forEach(({ keyword }) => {    // 旧写法
 + j.keywords
 +   .sort((a, b) => b.keyword.length - a.keyword.length) // 先长后短
 +   .forEach(({ keyword }) => {                          // 新写法
