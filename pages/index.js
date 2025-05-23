@@ -38,19 +38,22 @@ export default function Home() {
     linkedMap.current.clear();
 
     /* --- 高亮关键词 --- */
-    let body = j.original;
-    j.keywords.forEach(({ keyword }) => {
+let body = j.original;
+- j.keywords.forEach(({ keyword }) => {    // 旧写法
++ j.keywords
++   .sort((a, b) => b.keyword.length - a.keyword.length) // 先长后短
++   .forEach(({ keyword }) => {                          // 新写法
       const kw  = keyword.trim();
       const pos = keywordCounter.current[kw] ?? 0;
       keywordCounter.current[kw] = pos + 1;
 
       body = body.replace(
-        new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i'),
+        new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i'),
         `<span data-kw="${kw}" data-pos="${pos}" class="kw bg-kwBg text-kwFg px-1 rounded cursor-pointer hover:bg-kwFg/10">${kw}<sup class="caret ml-0.5">▾</sup></span>`
       );
     });
-    setHtml(body);
-  }
+setHtml(body);
+
 
   /* ---------- 点击编辑区域 ---------- */
   function onClickEditor(e) {
