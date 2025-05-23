@@ -71,30 +71,38 @@ export default function Home() {
   }
 
   /* ---------- 选链接 ---------- */
-  async function chooseLink(kw, opt) {
-    const span = linkedMap.current.get(kw) ||
-      document.querySelector(`span[data-kw="${CSS.escape(kw)}"][data-pos="0"]`);
-    if (!span) return;
+ async function chooseLink(kw, opt) {
+   const span = linkedMap.current.get(kw) ||
+     document.querySelector(`span[data-kw="${CSS.escape(kw)}"][data-pos="0"]`);
+   if (!span) return;
 
-    const sentence = span.closest('p')?.innerText || '';
+   const sentence = span.closest('p')?.innerText || '';
 
-    let reason = '';
-    try {
-      const r = await fetch('/api/reason', {
-        method : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ url: opt.url, phrase: kw, sentence }),
-      });
-      if (r.ok) reason = (await r.json()).reason;
-    } catch {}
-    if (!reason) reason = 'relevant reference';
++  /* ① 把输入框内容切分成额外语境词数组 */
++  const extra = extraInput.split(/[,\\s]+/).filter(Boolean);
 
-    span.className = 'picked underline text-blue-800';
-    span.innerHTML = `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a> ((${reason}))`;
+   let reason = '';
+   try {
+     const r = await fetch('/api/reason', {
+       method : 'POST',
+       headers: { 'Content-Type': 'application/json' },
+-      body   : JSON.stringify({ url: opt.url, phrase: kw, sentence }),
++      body   : JSON.stringify({ url: opt.url, phrase: kw, sentence, extra }), // ② 加 extra
+     });
+     if (r.ok) reason = (await r.json()).reason;
+   } catch {}
+   if (!reason) reason = 'relevant reference';
 
-    linkedMap.current.set(kw, span);
-    setActiveKw(null);
-  }
+   span.className = 'picked underline text-blue-800';
+   span.innerHTML = `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a> ((${reason}))`;
+
+   linkedMap.current.set(kw, span);
+   setActiveKw(null);
++
++  /* ③ 选完后清空输入框 */
++  setExtraInput('');
+ }
+
 
   /* ---------- 移除外链 ---------- */
   function removeLink(kw) {
