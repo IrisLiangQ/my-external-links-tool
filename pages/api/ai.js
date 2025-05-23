@@ -4,12 +4,25 @@
  * 关键词改为 “1-4 个英文单词的短语”
  */
 
+/* ===== BEGIN 修改：获取当前域名 ===== */
+function getBaseUrl(req) {
+  // ① Vercel 线上
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  // ② 本地 dev / 其他
+  const proto = req.headers['x-forwarded-proto'] || 'http';
+  const host  = req.headers.host || 'localhost:3000';
+  return `${proto}://${host}`;
+}
+/* ===== END 修改 ===================== */
+
 export default async function handler(req, res) {
   const { text = '' } = req.body || {};
-  if (!text.trim()) return res.status(400).json({ error: 'text required' });
+  if (!text.trim()) {
+    return res.status(400).json({ error: 'text required' });
+  }
 
   /* ---------- 1. GPT 提取短语 ---------- */
-  const gpt = await fetch('https://api.openai.com/v1/chat/completions', {
+  const gptResp = await fetch('https://api.openai.com/v1/chat/completions', {
     method : 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -29,26 +42,37 @@ export default async function handler(req, res) {
         { role: 'user', content: text.slice(0, 2000) },
       ],
     }),
-  }).then(r => r.json()).catch(() => null);
+  }).then(r => r.json())
+    .catch(() => null);        // 网络 / OpenAI 报错保护
 
+  /* ===== BEGIN 修改：安全 JSON.parse ===== */
   let phrases = [];
   try {
-    phrases = JSON.parse(gpt.choices[0].message.content);
+    const raw = gptResp?.choices?.[0]?.message?.content || '[]';
+    phrases = JSON.parse(raw);
   } catch {
-    /* 万一解析失败，退回空数组 */
+    // 解析失败直接置空，后续就不会请求 search
+    phrases = [];
   }
+  /* ===== END 修改 ======================= */
 
   /* ---------- 2. 调 /api/search 为每个短语找外链 ---------- */
+  const base = getBaseUrl(req);                 // ← 使用动态域名
   const keywords = await Promise.all(
     phrases.map(async (kw) => {
-      const r = await fetch('http://localhost:3000/api/search', {   // ← 若部署域名不同请改
-        method : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify({ kw, text }),
-      }).then(r => r.json()).catch(() => ({ links: [] }));
-      return { keyword: kw, options: r.links };
+      let links = [];
+      try {
+        const s = await fetch(`${base}/api/search`, {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body   : JSON.stringify({ kw, text }),
+        }).then(r => r.json());
+        // ===== BEGIN 修改：search JSON 安全读取
+        if (Array.isArray(s?.links)) links = s.links;
+        // ===== END 修改
+      } catch {
+        /* 网络错误时保持 links 为空 */
+      }
+      return { keyword: kw, options: links };
     }),
   );
-
-  return res.status(200).json({ original: text, keywords });
-}
