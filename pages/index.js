@@ -11,6 +11,7 @@ export default function Home() {
   const [activeKw, setActiveKw] = useState(null);    // 当前打开弹窗的关键词
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [extraInput, setExtraInput] = useState('');
 
   /* refs */
   const linkedMap      = useRef(new Map());
@@ -170,6 +171,13 @@ function copyHtml() {
 
       {activeKw && (
         <div ref={popupRef} className="fixed z-50 w-96 bg-white shadow-lg rounded-xl border animate-fadeIn">
+        <input
+  type="text"
+  placeholder="Extra context (e.g. EV, charger)"
+  value={extraInput}
+  onChange={e => setExtraInput(e.target.value)}
+  className="w-full border-b px-4 py-2 text-sm focus:outline-none"
+/>
           {data.keywords.find(k => k.keyword === activeKw)?.options.map((o, i) => (
             <button
               key={i}
