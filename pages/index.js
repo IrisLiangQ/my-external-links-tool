@@ -39,19 +39,20 @@ export default function Home() {
 
     /* --- 高亮关键词 --- */
 let body = j.original;
-+ j.keywords
-+   .sort((a, b) => b.keyword.length - a.keyword.length) // 先长后短
-+   .forEach(({ keyword }) => {                          // 新写法
-      const kw  = keyword.trim();
-      const pos = keywordCounter.current[kw] ?? 0;
-      keywordCounter.current[kw] = pos + 1;
+j.keywords
+  .sort((a, b) => b.keyword.length - a.keyword.length) // 先长后短
+  .forEach(({ keyword }) => {
+    const kw  = keyword.trim();
+    const pos = keywordCounter.current[kw] ?? 0;
+    keywordCounter.current[kw] = pos + 1;
 
-      body = body.replace(
-        new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i'),
-        `<span data-kw="${kw}" data-pos="${pos}" class="kw bg-kwBg text-kwFg px-1 rounded cursor-pointer hover:bg-kwFg/10">${kw}<sup class="caret ml-0.5">▾</sup></span>`
-      );
-    });
+    body = body.replace(
+      new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i'),
+      `<span data-kw="${kw}" data-pos="${pos}" class="kw bg-kwBg text-kwFg px-1 rounded cursor-pointer hover:bg-kwFg/10">${kw}<sup class="caret ml-0.5">▾</sup></span>`
+    );
+  });
 setHtml(body);
+
 
 
   /* ---------- 点击编辑区域 ---------- */
