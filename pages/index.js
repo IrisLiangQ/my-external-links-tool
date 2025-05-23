@@ -105,17 +105,17 @@ export default function Home() {
     setActiveKw(null);
   }
 
-  /* ---------- 复制 HTML ---------- */
-  function copyHtml() {
-    let final = html
-      .replace(/<span[^>]*>([\s\S]*?)<\\/span>/g, '$1')
-      .replace(/<sup[^>]*>[\s\S]*?<\\/sup>/g, '')
-      .replace(/\s+\)/g, ')');
+ /* ---------- 复制 HTML ---------- */
+function copyHtml() {
+  let final = html
+    .replace(/<span[^>]*>([\s\S]*?)<\/span>/gi, '$1')  // 去 <span ...>...</span>
+    .replace(/<sup[^>]*>[\s\S]*?<\/sup>/gi, '')        // 去 <sup>▾</sup>
+    .replace(/\s+\)/g, ')');                           // 压多余空格
 
-    navigator.clipboard.writeText(final);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
+  navigator.clipboard.writeText(final);
+  setCopied(true);
+  setTimeout(() => setCopied(false), 2000);
+}
 
   /* -------------------- UI -------------------- */
   return (
