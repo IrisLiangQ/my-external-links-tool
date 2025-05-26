@@ -11,12 +11,12 @@ export default function Home() {
   const [activeKw,   setActiveKw]   = useState(null);   // 当前弹窗关键词
   const [loading,    setLoading]    = useState(false);
   const [copied,     setCopied]     = useState(false);
-  const [extraInput, setExtraInput] = useState('');
+  const [extraInput, setExtraInput] = useState('');     // 🆕 文章级上下文
 
   /* refs */
   const linkedMap      = useRef(new Map());             // kw → 首个已插入外链 span
   const popupRef       = useRef(null);
-  const keywordCounter = useRef({});                    // kw → 当前已高亮次数
+  const keywordCounter = useRef({});                    // kw → 已高亮次数
 
   /* ---------- 调用 /api/ai ---------- */
   async function analyze() {
@@ -102,7 +102,6 @@ export default function Home() {
 
     linkedMap.current.set(kw, span);
     setActiveKw(null);
-    setExtraInput('');
   }
 
   /* ---------- 移除外链 ---------- */
@@ -130,6 +129,15 @@ export default function Home() {
   /* -------------------- UI -------------------- */
   return (
     <div className="min-h-screen flex flex-col items-center py-8 px-4 bg-gray-50 font-sans">
+      {/* 文章级额外语境输入框 */}
+      <input
+        type="text"
+        placeholder="Extra context (e.g. EV, charger)"
+        value={extraInput}
+        onChange={(e) => setExtraInput(e.target.value)}
+        className="mb-4 w-full max-w-md border px-4 py-2 rounded focus:outline-brand"
+      />
+
       <header className="text-center mb-6">
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <span className="text-brand">⚡</span> 外链优化
@@ -186,16 +194,6 @@ export default function Home() {
           ref={popupRef}
           className="fixed z-50 w-96 bg-white shadow-lg rounded-xl border animate-fadeIn"
         >
-          {/* 额外语境输入框 */}
-          <input
-            type="text"
-            placeholder="Extra context (e.g. EV, charger)"
-            value={extraInput}
-            onChange={(e) => setExtraInput(e.target.value)}
-            className="w-full border-b px-4 py-2 text-sm focus:outline-none"
-          />
-
-          {/* 保护：data?.keywords 必须存在 */}
           {data.keywords
             .find((k) => k.keyword === activeKw)
             ?.options.map((o, i) => (
