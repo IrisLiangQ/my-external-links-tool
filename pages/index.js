@@ -2,26 +2,27 @@
 import { useState, useRef, useEffect } from 'react';
 import { FiCopy, FiLink } from 'react-icons/fi';
 
-/* --------------- 主组件 ---------------- */
+/* ----------------- 主组件 ----------------- */
 export default function Home() {
-  /* ---------- 状态 ---------- */
-  const [raw,        setRaw]        = useState('');
-  const [data,       setData]       = useState(null);      // { original, keywords:[{keyword, options}] }
-  const [html,       setHtml]       = useState('');
-  const [activeKw,   setActiveKw]   = useState(null);      // 当前弹窗关键词
-  const [loading,    setLoading]    = useState(false);
-  const [copied,     setCopied]     = useState(false);
+  /* ---------- state ---------- */
+  const [raw, setRaw] = useState('');
+  const [data, setData] = useState(null);          // { original, keywords[] }
+  const [html, setHtml] = useState('');
+  const [activeKw, setActiveKw] = useState(null);  // 当前弹窗关键词
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  const [extraInput, setExtraInput] = useState('');        // 文章级上下文
-  const [showExtra,  setShowExtra]  = useState(false);     // 输入框显隐
+  /* Extra-context 输入框 */
+  const [showExtra,  setShowExtra]  = useState(false);
+  const [extraInput, setExtraInput] = useState('');
+  const extraRef = useRef(null);
 
   /* refs */
-  const linkedMap      = useRef(new Map());                // kw → 首个已插外链 span
+  const linkedMap      = useRef(new Map());
   const popupRef       = useRef(null);
-  const keywordCounter = useRef({});
-  const extraRef       = useRef(null);
+  const kwCounter      = useRef({});
 
-  /* ---------- Esc / Click-outside 关闭输入框 ---------- */
+  /* ---------- ESC / click-outside 关闭 extra 输入框 ---------- */
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') setShowExtra(false); }
     function onClick(e) {
@@ -35,14 +36,11 @@ export default function Home() {
     };
   }, [showExtra]);
 
-  /* ---------- 调用 /api/ai ---------- */
+  /* ---------- 调 /api/ai ---------- */
   async function analyze() {
     if (!raw.trim()) { alert('请先粘贴英文段落！'); return; }
 
     setLoading(true);
-    setData(null);
-    keywordCounter.current = {};
-
     const r = await fetch('/api/ai', {
       method : 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -54,16 +52,16 @@ export default function Home() {
     const j = await r.json();
     setData(j);
     linkedMap.current.clear();
+    kwCounter.current = {};
 
-    /* --- 高亮关键词（先长后短防嵌套） --- */
+    /* --- 高亮关键短语（先长后短） --- */
     let body = j.original;
     j.keywords
       .sort((a, b) => b.keyword.length - a.keyword.length)
       .forEach(({ keyword }) => {
-        const kw  = keyword.trim();
-        const pos = keywordCounter.current[kw] ?? 0;
-        keywordCounter.current[kw] = pos + 1;
-
+        const kw = keyword.trim();
+        const pos = kwCounter.current[kw] ?? 0;
+        kwCounter.current[kw] = pos + 1;
         body = body.replace(
           new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i'),
           `<span data-kw="${kw}" data-pos="${pos}" class="kw bg-kwBg text-kwFg px-1 rounded cursor-pointer hover:bg-kwFg/10">${kw}<sup class="caret ml-0.5">▾</sup></span>`
@@ -72,7 +70,7 @@ export default function Home() {
     setHtml(body);
   }
 
-  /* ---------- 点击编辑区域 ---------- */
+  /* ---------- 点击编辑区 ---------- */
   function onClickEditor(e) {
     const span = e.target.closest('span.kw, span.picked');
     if (!span) return;
@@ -84,16 +82,15 @@ export default function Home() {
 
     if (popupRef.current) {
       const rc = span.getBoundingClientRect();
-      popupRef.current.style.top       = `${rc.bottom + window.scrollY + 6}px`;
-      popupRef.current.style.left      = `${rc.left + rc.width / 2 + window.scrollX}px`;
+      popupRef.current.style.top  = `${rc.bottom + window.scrollY + 6}px`;
+      popupRef.current.style.left = `${rc.left + rc.width / 2 + window.scrollX}px`;
       popupRef.current.style.transform = 'translateX(-50%)';
     }
   }
 
   /* ---------- 选链接 ---------- */
   async function chooseLink(kw, opt) {
-    const span =
-      linkedMap.current.get(kw) ||
+    const span = linkedMap.current.get(kw) ||
       document.querySelector(`span[data-kw="${CSS.escape(kw)}"][data-pos="0"]`);
     if (!span) return;
 
@@ -109,11 +106,11 @@ export default function Home() {
       });
       if (r.ok) reason = (await r.json()).reason;
     } catch {}
-
     if (!reason) reason = 'relevant reference';
 
     span.className = 'picked underline text-blue-800';
-    span.innerHTML = `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a> ((${reason}))`;
+    span.innerHTML =
+      `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a> ((${reason}))`;
 
     linkedMap.current.set(kw, span);
     setActiveKw(null);
@@ -182,18 +179,19 @@ export default function Home() {
               onClick={onClickEditor}
             />
 
-            <div className="text-right space-y-4">
-              {showExtra && (
-                <input
-                  ref={extraRef}
-                  type="text"
-                  placeholder="Extra context (e.g. EV, charger)"
-                  value={extraInput}
-                  onChange={(e) => setExtraInput(e.target.value)}
-                  className="w-full border rounded-md px-4 py-2 text-sm focus:outline-brand"
-                />
-              )}
+            {/* 文章级 Extra 输入框（按按钮后显现） */}
+            {showExtra && (
+              <input
+                ref={extraRef}
+                type="text"
+                placeholder="Extra context (e.g. EV, charger)"
+                value={extraInput}
+                onChange={(e) => setExtraInput(e.target.value)}
+                className="w-full border rounded-md px-4 py-2 mt-4 text-sm focus:outline-brand"
+              />
+            )}
 
+            <div className="text-right mt-4">
               <button
                 onClick={copyHtml}
                 className="inline-flex items-center gap-2 px-6 py-2 rounded bg-black text-white hover:bg-gray-800"
@@ -205,14 +203,14 @@ export default function Home() {
         )}
       </div>
 
-      {/* 浮动改进按钮 */}
+      {/* 右下改进按钮  */}
       {data && (
         <button
           onClick={() => {
             setShowExtra(true);
-            setTimeout(() => extraRef.current?.focus(), 30);
+            setTimeout(() => extraRef.current?.focus(), 50);
           }}
-          className="fixed bottom-8 right-8 bg-blue-600 text-white px-4 py-2 rounded-full shadow flex items-center gap-2 hover:bg-blue-500"
+          className="fixed bottom-8 right-8 bg-blue-600 text-white px-4 py-2 rounded-full shadow hover:bg-blue-500"
         >
           ✎ 改进推荐
         </button>
@@ -235,9 +233,7 @@ export default function Home() {
                 <p className="text-sm font-medium truncate w-full">
                   {o.title || o.url}
                 </p>
-                <p className="text-xs text-gray-600 truncate w-full">
-                  {o.url}
-                </p>
+                <p className="text-xs text-gray-600 truncate w-full">{o.url}</p>
               </button>
             ))}
 
