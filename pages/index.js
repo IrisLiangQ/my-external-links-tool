@@ -1,22 +1,39 @@
 // pages/index.js
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { FiCopy, FiLink } from 'react-icons/fi';
 
 /* --------------- 主组件 ---------------- */
 export default function Home() {
   /* ---------- 状态 ---------- */
   const [raw,        setRaw]        = useState('');
-  const [data,       setData]       = useState(null);   // { original, keywords:[{keyword, options}] }
+  const [data,       setData]       = useState(null);      // { original, keywords:[{keyword, options}] }
   const [html,       setHtml]       = useState('');
-  const [activeKw,   setActiveKw]   = useState(null);   // 当前弹窗关键词
+  const [activeKw,   setActiveKw]   = useState(null);      // 当前弹窗关键词
   const [loading,    setLoading]    = useState(false);
   const [copied,     setCopied]     = useState(false);
-  const [extraInput, setExtraInput] = useState('');     // 🆕 文章级上下文
+
+  const [extraInput, setExtraInput] = useState('');        // 文章级上下文
+  const [showExtra,  setShowExtra]  = useState(false);     // 输入框显隐
 
   /* refs */
-  const linkedMap      = useRef(new Map());             // kw → 首个已插入外链 span
+  const linkedMap      = useRef(new Map());                // kw → 首个已插外链 span
   const popupRef       = useRef(null);
-  const keywordCounter = useRef({});                    // kw → 已高亮次数
+  const keywordCounter = useRef({});
+  const extraRef       = useRef(null);
+
+  /* ---------- Esc / Click-outside 关闭输入框 ---------- */
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') setShowExtra(false); }
+    function onClick(e) {
+      if (showExtra && !extraRef.current?.contains(e.target)) setShowExtra(false);
+    }
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('mousedown', onClick);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('mousedown', onClick);
+    };
+  }, [showExtra]);
 
   /* ---------- 调用 /api/ai ---------- */
   async function analyze() {
@@ -38,7 +55,7 @@ export default function Home() {
     setData(j);
     linkedMap.current.clear();
 
-    /* --- 高亮关键词（先长后短防止子串嵌套） --- */
+    /* --- 高亮关键词（先长后短防嵌套） --- */
     let body = j.original;
     j.keywords
       .sort((a, b) => b.keyword.length - a.keyword.length)
@@ -65,7 +82,6 @@ export default function Home() {
 
     setActiveKw(activeKw === kw ? null : kw);
 
-    // 让弹窗跟随选中词
     if (popupRef.current) {
       const rc = span.getBoundingClientRect();
       popupRef.current.style.top       = `${rc.bottom + window.scrollY + 6}px`;
@@ -92,13 +108,12 @@ export default function Home() {
         body   : JSON.stringify({ url: opt.url, phrase: kw, sentence, extra }),
       });
       if (r.ok) reason = (await r.json()).reason;
-    } catch {/* 忽略 */ }
+    } catch {}
 
     if (!reason) reason = 'relevant reference';
 
     span.className = 'picked underline text-blue-800';
-    span.innerHTML =
-      `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a> ((${reason}))`;
+    span.innerHTML = `<a href="${opt.url}" target="_blank" rel="noopener">${kw}</a> ((${reason}))`;
 
     linkedMap.current.set(kw, span);
     setActiveKw(null);
@@ -116,7 +131,7 @@ export default function Home() {
 
   /* ---------- 复制 HTML ---------- */
   function copyHtml() {
-    let final = html
+    const final = html
       .replace(/<span[^>]*>([\s\S]*?)<\/span>/gi, '$1')
       .replace(/<sup[^>]*>[\s\S]*?<\/sup>/gi, '')
       .replace(/\s+\)/g, ')');
@@ -129,15 +144,6 @@ export default function Home() {
   /* -------------------- UI -------------------- */
   return (
     <div className="min-h-screen flex flex-col items-center py-8 px-4 bg-gray-50 font-sans">
-      {/* 文章级额外语境输入框 */}
-      <input
-        type="text"
-        placeholder="Extra context (e.g. EV, charger)"
-        value={extraInput}
-        onChange={(e) => setExtraInput(e.target.value)}
-        className="mb-4 w-full max-w-md border px-4 py-2 rounded focus:outline-brand"
-      />
-
       <header className="text-center mb-6">
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <span className="text-brand">⚡</span> 外链优化
@@ -176,7 +182,18 @@ export default function Home() {
               onClick={onClickEditor}
             />
 
-            <div className="text-right">
+            <div className="text-right space-y-4">
+              {showExtra && (
+                <input
+                  ref={extraRef}
+                  type="text"
+                  placeholder="Extra context (e.g. EV, charger)"
+                  value={extraInput}
+                  onChange={(e) => setExtraInput(e.target.value)}
+                  className="w-full border rounded-md px-4 py-2 text-sm focus:outline-brand"
+                />
+              )}
+
               <button
                 onClick={copyHtml}
                 className="inline-flex items-center gap-2 px-6 py-2 rounded bg-black text-white hover:bg-gray-800"
@@ -187,6 +204,19 @@ export default function Home() {
           </>
         )}
       </div>
+
+      {/* 浮动改进按钮 */}
+      {data && (
+        <button
+          onClick={() => {
+            setShowExtra(true);
+            setTimeout(() => extraRef.current?.focus(), 30);
+          }}
+          className="fixed bottom-8 right-8 bg-blue-600 text-white px-4 py-2 rounded-full shadow flex items-center gap-2 hover:bg-blue-500"
+        >
+          ✎ 改进推荐
+        </button>
+      )}
 
       {/* -------- 弹窗：链接选项 / 移除 -------- */}
       {activeKw && data && (
@@ -205,7 +235,9 @@ export default function Home() {
                 <p className="text-sm font-medium truncate w-full">
                   {o.title || o.url}
                 </p>
-                <p className="text-xs text-gray-600 truncate w-full">{o.url}</p>
+                <p className="text-xs text-gray-600 truncate w-full">
+                  {o.url}
+                </p>
               </button>
             ))}
 
